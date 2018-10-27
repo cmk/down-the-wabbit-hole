@@ -9,7 +9,7 @@ Note:
 
 Hi! Hi Im Chris and I work at Formation, mostly on on ML stuff. 
 
-We're trying to reinvent loyalty programs with reinforcement learning.
+We're using reinforcement learning to reinvent loyalty programs.
 
 I'm going to share some techniques we've been using in our Haskell codebase to help us write better code.
 
@@ -42,16 +42,24 @@ Testing code is often the first time that you go to actually use the code you wr
 It's the first time you have to setup the surrounding code and infrastructure, and you get immediate feedback on how good your code is to reuse.
 
 
-# Two common issues w/ ML code
+# Common issues in ML
 ## Reproducibility
 ![](kaggle-ML.png) <!-- .element: id="plain" -->
 
+Note:
+
+This is one most people are aware of. ML code often contains hidden configuration dependencies (e.g. hyperparameters, seeds for random number generators, upstream feature engineering, etc).
+
+# Common issues in ML
 ## Glue code
+![](tech-debt.png) 
 <!-- .element: class="fragment" -->
+
+### "Glue code can be reduced by choosing to re-implement specific algorithms within the broader system architecture." -Google
 
 Note:
 
-Machine learning packages may often be treated as black boxes, resulting in large masses of “glue code” or calibration layers that can lock in assumptions.
+This one is less well-known. Machine learning packages may often be treated as black boxes, resulting in large masses of “glue code” or calibration layers that can lock in assumptions.
 
 This is certainly true of vowpal wabbit, a contextual bandits library we bootstrapped with. Even with frameworks like tensorflow ...
 
@@ -60,8 +68,7 @@ Machine learning researchers tend to develop general purpose solutions as self-c
 
 Using self-contained solutions often results in a glue code system design pattern, in which a massive amount of supporting code is written to get data into and out of general-purpose packages.
 
-This glue code design pattern can be costly in the long term, as it tends to freeze a system to the
-peculiarities of a specific package. 
+This glue code design pattern can be costly in the long term, as it tends to freeze a system to the peculiarities of a specific package. 
 
 General purpose solutions often have different design goals: they seek to provide one learning system to solve many problems, but many practical software systems are highly engineered to apply to one large-scale problem, for which many experimental solutions
 are sought. While generic systems might make it possible to interchange optimization algorithms,
@@ -72,8 +79,9 @@ imentation with other machine learning approaches prohibitively expensive, resul
 tax on innovation.
 
 
-Glue code can be reduced by choosing to re-implement specific algorithms within the broader system
-architecture. At first, this may seem like a high cost to pay—re-implementing a machine learning
+
+
+At first, this may seem like a high cost to pay—re-implementing a machine learning
 package in C++ or Java that is already available in R or matlab, for example, may appear to be
 a waste of effort. But the resulting system may require dramatically less glue code to integrate in
 the overall system, be easier to test, be easier to maintain, and be better designed to allow alternate
@@ -85,41 +93,4 @@ mature system might end up being (at most) 5% machine learning code and (at leas
 reimplementation rather than reuse of a clumsy API looks like a much better strategy
 
 
-# Test Driven Design
 
-* Informs API/library design
-<!-- .element: class="fragment" -->
-* Immediate feedback on code reusability
-<!-- .element: class="fragment" -->
-* Free regression/unit testing
-<!-- .element: class="fragment" -->
-
-Note:
-
-Writing tests first is a great proxy for writing good code.
-You get immediate feedback on your library design.
-Having tests to cover correctness and find bugs is just about a nice side effect. 
-
-
-# TDD is hard!
-
-Note:
-
-Writing test-first is *really* difficult.
-This is partially because writing code that is nice to test (and, by proxy, reuse/modify/understand/etc) is really difficult.
-
-
-# This isn't a TDD talk
-
-Note:
-
-I don't care about TDD. Testability is a nice *proxy* for "good" code.
-
-
-<!-- .slide: data-background="finger-moon.jpg" -->
-Note:
-
-Code that's easy to test tends to be easy to modify, update, reuse, and verify.
-It is like a finger pointing at the moon of good software: don't look at the
-tests, look at the good software! You don't have to write tests to write good
-code, and just because you wrote tests doesn't mean your code is nice.
