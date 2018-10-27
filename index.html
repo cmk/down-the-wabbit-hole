@@ -29,6 +29,19 @@ link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' 
 document.getElementsByTagName( 'head' )[0].appendChild( link );
     </script>
 
+    <link rel="stylesheet" href="plugin/reveal.js-fullscreen-code/reveal.js-fullscreen-code.css">
+    <script>
+      Reveal.initialize({
+        // ...
+        dependencies: [
+            // ...
+            { src: 'plugin/reveal.js-fullscreen-code/jquery-3.1.1.min.js' },
+            { src: 'plugin/reveal.js-fullscreen-code/reveal.js-fullscreen-code.js' }
+        ]
+        // ...
+      });
+    </script>
+
     <style>
 .bg-hl {
   background: RGBa(0, 0, 0, 0.8);
