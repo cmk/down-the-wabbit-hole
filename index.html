@@ -4,7 +4,7 @@
   <head>
     <meta charset="utf-8">
 
-    <title>I Command You To Be Free!</title>
+    <title>Down the Wabbit Hole</title>
 
     <meta name="description" content="A talk on FP patterns in ML eng">
     <meta name="author" content="Chris McKinlay">
@@ -20,6 +20,9 @@
     <!-- Code syntax highlighting -->
     <link rel="stylesheet" href="lib/css/gruvbox-dark.css">
 
+    <!-- Large code slides -->
+    <link rel="stylesheet" href="plugin/reveal.js-fullscreen-code/reveal.js-fullscreen-code.css">
+
     <!-- Printing and PDF exports -->
     <script>
 var link = document.createElement( 'link' );
@@ -29,18 +32,6 @@ link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' 
 document.getElementsByTagName( 'head' )[0].appendChild( link );
     </script>
 
-    <link rel="stylesheet" href="plugin/reveal.js-fullscreen-code/reveal.js-fullscreen-code.css">
-    <script>
-      Reveal.initialize({
-        // ...
-        dependencies: [
-            // ...
-            { src: 'plugin/reveal.js-fullscreen-code/jquery-3.1.1.min.js' },
-            { src: 'plugin/reveal.js-fullscreen-code/reveal.js-fullscreen-code.js' }
-        ]
-        // ...
-      });
-    </script>
 
     <style>
 .bg-hl {
@@ -117,6 +108,8 @@ document.getElementsByTagName( 'head' )[0].appendChild( link );
 		<script src="lib/js/head.min.js"></script>
 		<script src="js/reveal.js"></script>
 
+
+
 		<script>
 
 Reveal.initialize({
@@ -132,10 +125,13 @@ Reveal.initialize({
   { src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
   { src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
   { src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
-    { src: 'plugin/math/math.js', async: true },
-    { src: 'plugin/highlight/highlight.js', callback: function() { hljs.initHighlightingOnLoad(); } },
-      { src: 'plugin/zoom-js/zoom.js', async: true },
-      { src: 'plugin/notes/notes.js', async: true }
+  { src: 'plugin/math/math.js', async: true },
+  { src: 'plugin/highlight/highlight.js', callback: function() { hljs.initHighlightingOnLoad(); } },
+  { src: 'plugin/zoom-js/zoom.js', async: true },
+  { src: 'plugin/notes/notes.js', async: true },
+  { src: 'plugin/reveal.js-fullscreen-code/jquery-3.1.1.min.js' },
+  { src: 'plugin/reveal.js-fullscreen-code/reveal.js-fullscreen-code.js' }
+
   ]
 });
                 </script>
