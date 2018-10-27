@@ -1,32 +1,28 @@
-# I Command You
+# Down the Wabbit Hole
 
-## To Be Free!
+## Some FP Design Patterns in ML engineering
 
-Matt Parsons
+Chris McKinlay
 
-
-![](image_MattParsons.jpg) <!-- .element: id="plain" -->
-![](seller-labs-dark.png) <!-- .element: id="plain" -->
 
 Note:
 
-Hi! I'm Matt Parsons.
-So this is me on the internet, and now I'm me in real life.
-I write Haskell, PHP, and JavaScript for Seller Labs.
-We make web applications to help Amazon merchants make more money.
+Hi! Hi Im Chris and I work at Formation, mostly on on ML stuff. 
 
-I'm going to share a technique we've been using in our PHP codebase to help us write better code.
+We're trying to reinvent loyalty programs with reinforcement learning.
+
+I'm going to share some techniques we've been using in our Haskell codebase to help us write better code.
 
 
 # Better code?
 
-* Performance?
-<!-- .element: class="fragment" -->
 * Correctness?
 <!-- .element: class="fragment" -->
 * Maintainability?
 <!-- .element: class="fragment" -->
 * Testability?
+<!-- .element: class="fragment" -->
+* Performance?
 <!-- .element: class="fragment" -->
 
 Note:
@@ -46,9 +42,9 @@ Testing code is often the first time that you go to actually use the code you wr
 It's the first time you have to setup the surrounding code and infrastructure, and you get immediate feedback on how good your code is to reuse.
 
 
-# Test Driven Design
+# Common issues w/ ML code
+## ![](kaggle-ML.png) <!-- .element: id="plain" -->
 
-## aka
 <!-- .element: class="fragment" -->
 
 ### If it sucks to test,
