@@ -1,6 +1,6 @@
 # Down the Wabbit Hole
 
-## Some FP Design Patterns in ML engineering
+### Some FP Design Patterns in ML engineering
 
 Chris McKinlay
 
@@ -55,7 +55,7 @@ This is one most people are aware of. ML code often contains hidden configuratio
 
 ### "Glue code can be reduced by choosing to re-implement specific algorithms within the broader system architecture." -Google
 
-Note:
+<aside class="notes">
 
 This one is less well-known. Machine learning packages may often be treated as black boxes, resulting in large masses of “glue code” or calibration layers that can lock in assumptions.
 
@@ -90,5 +90,6 @@ many machine learning systems is actually doing “machine learning”. When we 
 mature system might end up being (at most) 5% machine learning code and (at least) 95% glue code,
 reimplementation rather than reuse of a clumsy API looks like a much better strategy
 
+</aside>
 
 
