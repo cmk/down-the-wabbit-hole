@@ -344,9 +344,9 @@ body {
  *********************************************/
 .reveal {
   position: relative;
-  width: 100%;
+  width: 120%;
   height: 100%;
-  overflow: hidden;
+  overflow: visible;
   -ms-touch-action: none;
       touch-action: none; }
 
