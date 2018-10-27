@@ -42,16 +42,14 @@ Testing code is often the first time that you go to actually use the code you wr
 It's the first time you have to setup the surrounding code and infrastructure, and you get immediate feedback on how good your code is to reuse.
 
 
-# Common issues in ML
-## Reproducibility
+# Reproducibility
 ![](kaggle-ML.png) <!-- .element: id="plain" -->
 
 Note:
 
 This is one most people are aware of. ML code often contains hidden configuration dependencies (e.g. hyperparameters, seeds for random number generators, upstream feature engineering, etc).
 
-# Common issues in ML
-## Glue code
+# Glue code
 ![](tech-debt.png) 
 <!-- .element: class="fragment" -->
 
