@@ -19,7 +19,7 @@ Pretty much any sort of Haskell code can be written in this particular way, but 
 
 # A Handle
 
-<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
+```haskell
 module Source.Types where
 
 data ModelSource = ModelSource {
@@ -31,8 +31,7 @@ data ModelSource = ModelSource {
     -- ^ List all available versions for a given model.
   }
 newtype ModelFile = ModelFile { unModelFile :: FilePath } 
-</code></pre></div>
-
+```
 
 Note:
 
@@ -93,40 +92,19 @@ FilePath -> ST.ModelSource
 
 Note:
 
-So, here's the super simple add function. Testing it is super easy. We just
-pass in some input values, and make assertions about the output value. This
-test is pretty silly, but it's easy to come up with more advanced test cases.
 
+# More Complex Handles
 
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-describe "Add" do
-  it "is commutative" do
-    100.times do
-      x, y = 2.times { Random::rand }
-      expect(x + y).to eq(y + x)
-    end
-  end
+<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
+module MyApp.Database
 
-  it "is associative" do
-    100.times do
-      x, y, z = 3.times { Random::rand }
-      expect((x + y) + z).to eq(x + (y + z))
-    end
-  end
-end 
+data DatabaseHandle = DatabaseHandle
+    { hPool   :: Pool Postgres.Connection
+    , hCache  :: IORef (PSQueue Int Text User)
+    , hLogger :: Logger.Handle  -- Another handle!
+    , …
+    }
 </code></pre></div>
-
-Note:
-
-Here, we're testing that add is associative and commutative. We're taking
-a random sample of values, and ensuring that we can reorder our operations and
-group them however we want. These tests are *easy* to write. They're fun,
-almost. And they're kinda pretty! They look extremely close to the mathematical
-definitions of associativity and commutativity.
-
-This sounds trivial, but many difficult concepts in distributed systems involve
-guaranteeing properties like commutativity. Making these properties easy to test
-is important.
 
 
 # In Haskell, too!
