@@ -1,133 +1,95 @@
-# Methods and Functions
-
-## the unit of
-
-### uh, doing *stuff*
+# The Handle Pattern
 
 Note:
 
-So, when we talk about "doing stuff" in computer programming, we're typically talking about methods or functions.
+In Haskell, we try to capture ideas in beautiful, pure and mathematically sound patterns, for example Monoids. But at other times, we can’t do that. We might be dealing with some inherently mutable state, or we are simply dealing with external code which doesn’t behave nicely.
+
+In those cases, we need another approach. What we’re going to describe feels suspiciously similar to Object Oriented Programming:
+
+Encapsulating and hiding state inside objects
+Providing methods to manipulate this state rather than touching it directly
+Coupling these objects together with methods that modify their state
+As you can see, it is not exactly the same as Alan Kay’s original definition of OOP4, but it is far from the horrible incidents that permeate our field such as UML, abstract factory factories and broken subtyping.
+
+Before we dig in to the actual code, let’s talk about some disclaimers.
+
+Pretty much any sort of Haskell code can be written in this particular way, but that doesn’t mean that you should. This method relies heavily on IO. Whenever you can write things in a pure way, you should attempt to do that and avoid IO. This pattern is only useful when IO is required
 
 
-# Input and Output
 
-# Values and Effects
-<!-- .element: class="fragment" -->
+# A Handle
 
-Note:
+<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
+module Source.Types where
 
-In order to reason about our programs, we have to be able to talk about them.
-How can we talk about our functions?
-Generally, we can talk about a function in terms of the inputs and outputs that it has.
-We can also talk about a function in terms of the values and effects that it deals with.
-
-
-![](1000px-Ruby_logo.svg.png) <!-- .element: id="ruby-logo", style: "size: 100" --> ![](haskell_logo.svg) <!-- .element: id="haskell-logo" -->
-
-<3
-
-Note:
-
-The code in this talk will be a combination of Ruby and Haskell.
-Ruby is a dynamically typed object oriented programming language.
-Haskell is a statically typed pure functional programming language.
-We'll get to see how the same technique works out pretty great in both languages!
-
-
-# Values
-
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-class Foo
-  def my_func(x, y)            # value!
-    z = User.all.length
-    FooResult.insert(x, y, z)
-    x + y + z                  # value!
-  end
-end
+data ModelSource = ModelSource {
+    loadModel :: ModelId -> ModelVersion -> IO (Either LoadError ModelFile)
+    -- ^ Load a model.
+  , saveModel :: ModelId -> ModelFile -> IO ()
+    -- ^ Save a model.
+  , listVersions :: ModelId -> IO ([ModelVersion])
+    -- ^ List all available versions for a given model.
+  }
+newtype ModelFile = ModelFile { unModelFile :: FilePath } 
 </code></pre></div>
 
-* Input arguments
-* Return value
 
 Note:
 
-The *values* in this code snippet are the simple, easy bits. We pass in the
-numbers x and y, which are both values. We return x + y + z, which is also a simple
-value.
+The internals of the Handle typically consist of static fields and other handles, MVars, IORefs, TVars, Chans… With our Handle defined, we are able to define functions using it. 
 
-
-# Effects
-
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-class Foo
-  def my_func(x, y)
-    z = User.all.length       # effect!
-    FooResult.insert(x, y, z) # effect!
-    x + y + z
-  end
-end
-</code></pre></div>
-
-* Input effects
-* Output effects
-
-Note:
-
-The effects in this function are reading all of the users out of the database,
-and inserting a new result into the database.
-
-
-# Haskell
-
-<div id="lang-logo"><img src="haskell_logo.svg" id="lang"/><pre><code class="lang-haskell hljs" data-trim data-noescape>
-module Foo where
-
-myFunc :: Int -> Int -> DB Int
-myFunc x y = do
-    z <- fmap length selectUsers
-    insert (FooResult x y z)
-    pure (x + y + z)
-</code></pre></div>
-
-Note:
-
-Haskell's purity makes it really easy to figure out what's an effect and what's
-a value. In Ruby (or any other language, really) you have to either *know* or
-read the entire call graph of the code you're talking about. Haskell tracks it
-in the type, which makes these refactors really easy.
+I want to use this to train models in some map-reduce framework, serve models through some model serving framework, etc.
 
 
 # Values are *explicit*
 
+<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
+module Source.Capabilities where
+import Source.Types as ST
+
+loadModel ::
+  => MonadIO m
+  => ModelSource
+  -> ModelId
+  -> ModelVersion
+  -> m (Either LoadError Model)
+loadModel ms m v = do
+  liftIO $ ST.loadModel ms m v
+</code></pre></div>
+
+
 # Effects are *implicit*
 
+<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
+
+class HasModelSource s a | s -> a where
+  modelSource :: Lens' s a
+
+loadModel ::
+     HasModelSource r ModelSource
+  => MonadReader r m
+  => MonadIO m
+  => ModelId
+  -> ModelVersion
+  -> m (Either LoadError Model)
+loadModel m v = do
+  ms <- view modelSource
+  liftIO $ ST.loadModel ms m v
+</code></pre></div>
+
 Note:
-
-Values are, at a first approximation, the things we pass directly into
-functions or methods, and the things that are returned directly from functions.
-Input effects are the things that provide information to the function that we
-don't explicitly pass in. Output effects are the things that happen as a result
-of calling the method, that aren't explicitly part of the return value.
-
-So values are explicit. Testing values is easy, and testing is an OK
-approximation of good software. Effects are implicit. And testing effects is difficult.
 
 
 # Testing Values:
 
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-def add(x, y)
-  x + y
-end
+<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
+module Source.Local where
 
-# In some Spec.rb file, 
+FilePath -> ST.ModelSource
 
-describe "add" do
-  it "should add" do
-    expect(add(2, 3)).to eq 5
-  end
-end
+
 </code></pre></div>
+
 
 Note:
 

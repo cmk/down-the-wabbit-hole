@@ -49,6 +49,7 @@ Note:
 
 This is one most people are aware of. ML code often contains hidden configuration dependencies (e.g. hyperparameters, seeds for random number generators, upstream feature engineering, etc).
 
+
 # Glue code
 ![](tech-debt.png) 
 <!-- .element: class="fragment" -->
