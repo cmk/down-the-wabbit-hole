@@ -1,3 +1,9 @@
+# ML Architecture 
+
+![](ml-arch.png) 
+<!-- .element: class="fragment" -->
+
+
 # Refactoring Example
 
 Note:

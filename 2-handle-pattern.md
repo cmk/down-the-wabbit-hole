@@ -2,6 +2,8 @@
 
 Note:
 
+Haskell design patterns are sortof a blogosphere phenom, so I'll include some links at the end of the talk.
+
 In Haskell, we try to capture ideas in beautiful, pure and mathematically sound patterns, for example Monoids. But at other times, we can’t do that. We might be dealing with some inherently mutable state, or we are simply dealing with external code which doesn’t behave nicely.
 
 In those cases, we need another approach. What we’re going to describe feels suspiciously similar to Object Oriented Programming:
@@ -11,22 +13,28 @@ Providing methods to manipulate this state rather than touching it directly
 Coupling these objects together with methods that modify their state
 As you can see, it is not exactly the same as Alan Kay’s original definition of OOP4, but it is far from the horrible incidents that permeate our field such as UML, abstract factory factories and broken subtyping.
 
-Before we dig in to the actual code, let’s talk about some disclaimers.
-
 Pretty much any sort of Haskell code can be written in this particular way, but that doesn’t mean that you should. This method relies heavily on IO. Whenever you can write things in a pure way, you should attempt to do that and avoid IO. This pattern is only useful when IO is required
 
+https://www.schoolofhaskell.com/user/meiersi/the-service-pattern
+https://jaspervdj.be/posts/2018-03-08-handle-pattern.html
+https://www.tweag.io/posts/2018-04-25-funflow.html
+
+https://hackernoon.com/the-has-type-class-pattern-ca12adab70ae
+http://www.parsonsmatt.org/2018/03/22/three_layer_haskell_cake.html
+http://www.parsonsmatt.org/2018/04/10/transforming_transformers.html --opposite approach
+https://www.fpcomplete.com/blog/2017/06/readert-design-pattern
 
 
-# A Handle
+# A Simple Handle
 
 ```haskell
-module Source.Types where
+module Model.Source.Types where
 
-data ModelSource = ModelSource {
-    loadModel :: ModelId -> ModelVersion -> IO (Either LoadError ModelFile)
-    -- ^ Load a model.
-  , saveModel :: ModelId -> ModelFile -> IO ()
-    -- ^ Save a model.
+data SourceHandle = SourceHandle {
+    loadModel :: ModelId -> Maybe ModelVersion -> IO (Either LoadError ModelFile)
+    -- ^ Load a model file onto the local file system. If no version is provided get the latest version.
+  , saveModel :: ModelName -> ModelFile -> IO (Either SaveError ModelVersion)
+    -- ^ Save a model file, bumping the latest version.
   , listVersions :: ModelId -> IO ([ModelVersion])
     -- ^ List all available versions for a given model.
   }
@@ -35,348 +43,207 @@ newtype ModelFile = ModelFile { unModelFile :: FilePath }
 
 Note:
 
+We use TFS at work to serve a wide variety of models. TFS expects a model to consist of a directory w/ subdirs for each version. So we tend to use this format everywhere. the purpose of this handle is to broker safe access to the underlying dir. by safe i mean that it maintains certain properties (ie if a model has n versions and you call saveModel it will now have n+1 versions)
+How is this sim/diff from a type class?
+
 The internals of the Handle typically consist of static fields and other handles, MVars, IORefs, TVars, Chans… With our Handle defined, we are able to define functions using it. 
 
-I want to use this to train models in some map-reduce framework, serve models through some model serving framework, etc.
-
-
-# Values are *explicit*
-
-<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
-module Source.Capabilities where
-import Source.Types as ST
-
-loadModel ::
-  => MonadIO m
-  => ModelSource
-  -> ModelId
-  -> ModelVersion
-  -> m (Either LoadError Model)
-loadModel ms m v = do
-  liftIO $ ST.loadModel ms m v
-</code></pre></div>
-
-
-# Effects are *implicit*
-
-<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
-
-class HasModelSource s a | s -> a where
-  modelSource :: Lens' s a
-
-loadModel ::
-     HasModelSource r ModelSource
-  => MonadReader r m
-  => MonadIO m
-  => ModelId
-  -> ModelVersion
-  -> m (Either LoadError Model)
-loadModel m v = do
-  ms <- view modelSource
-  liftIO $ ST.loadModel ms m v
-</code></pre></div>
-
-Note:
-
-
-# Testing Values:
-
-<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
-module Source.Local where
-
-FilePath -> ST.ModelSource
-
-
-</code></pre></div>
-
-
-Note:
-
-
-# More Complex Handles
-
-<div id="lang-logo"><pre><code class="lang-haskell hljs" data-trim data-noescape>
-module MyApp.Database
-
+It's also possible to do more involved operations there (pools, io refs, other handles, etc)
 data DatabaseHandle = DatabaseHandle
     { hPool   :: Pool Postgres.Connection
     , hCache  :: IORef (PSQueue Int Text User)
     , hLogger :: Logger.Handle  -- Another handle!
     , …
     }
-</code></pre></div>
 
 
-# In Haskell, too!
+# Using a Handle
 
-<div id="lang-logo"><img src="haskell_logo.svg" id="lang"/><pre><code class="lang-haskell hljs" data-trim data-noescape>
-add x y = x + y
+```haskell
+module Model.Source.API where
+import Model.Source.Types as ST
 
-spec = 
-  describe "add" $ do
-    it "should add numbers" $ do
-      add 2 3 \`shouldBe\` 5    
-    prop "is commutative" $ \x y -> do
-      add x y \`shouldBe\` add y x
-    prop "is associative" $ \x y z -> do
-      add x (add y z) \`shouldBe\` add (add x y) z
-</code></pre></div>
+loadModel ::
+  => MonadIO m
+  => SourceHandle
+  -> ModelId
+  -> Maybe ModelVersion
+  -> m (Either LoadError Model)
+loadModel h id mv = do
+  liftIO $ ST.loadModel h id mv
+```
 
-Note:
-
-The tests we have for the Ruby and Haskell are just about the same! It's a
-little easier to write the tests in Haskell, but we've got basically the same
-thing going on.
+Note: Discuss MonadReader?
 
 
-# Testing Effects:
+# Dependently Typed Handles
 
-### dun
-<!-- .element: class="fragment" -->
+```haskell
+{-# LANGUAGE GADTs      #-}
+{-# LANGUAGE RankNTypes #-}
 
-### dun
-<!-- .element: class="fragment" -->
-### dun
-<!-- .element: class="fragment" -->
-
-Note:
-
-So let's talk about testing effects. (dun dun dun)
-
-Testing effects is a lot harder. And sometimes, it can get really messy.
-So let's go through some of the ways that we might test effects. We'll start
-out kinda messy and wrong, and we'll evaluate some of the solutions that are
-common today.
-
-
-# Testing Effects:
-
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-class Foo
-  def my_func(x, y)
-    z = User.all.length       # effect!
-    FooResult.insert(x, y, z) # effect!
-    x + y + z
-  end
-end
-</code></pre></div>
+data ModelHandle ti si o e where
+  ModelHandle :: {
+      learn :: MonadIO m => ti -> m ()
+    , score :: MonadIO m => si -> m o
+    , error :: MonadIO m => ti -> m e
+  } -> ModelHandle ti si o e
+```
 
 Note:
-
-Testing effects is a lot harder. Suddenly we have to worry about what User is,
-and what happens when we do FooResult. I'm going to evolve testing this example.
-
-
-# Wrong
-
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-describe "Foo#my_func" do
-  it "adds inputs" do
-    expect(Foo.new.my_func(1,2)).to eq(3)
-  end
-end
-</code></pre></div>
-
-Note:
-
-So this attempt is flat out wrong. However, on an uninitialized database with 0
-users, it'll return the right answer. This is a *fragile* test, even though it
-may pass sometimes. We also don't capture the effect of creating a FooResult in
-the database.
+I want to use this to train models in some map-reduce framework, serve models through some model serving framework, etc.
+Use GADTs to avoid exposing the monadic parameter m.
+Separate training and serving inputs. Error type is used to drive SGD behavior.
 
 
-# Wrong Haskell
+#  Dependently Typed Handles
 
-<div id="lang-logo"><img src="haskell_logo.svg" id="lang"/><pre><code class="lang-haskell hljs" data-trim data-noescape>
-describe "Foo.myFunc" $ do
-  it "adds inputs" $ do
-    Foo.myFunc 1 2 
-      \`shouldReturn\` 
-        3
-</code></pre></div>
+```haskell
+{-# LANGUAGE TypeFamilies     #-}
+{-# LANGUAGE TypeApplications #-}
 
-Note:
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Exception.Safe (MonadMask)
+import qualified Data.Tagged as T
 
-Haskell isn't going to protect us here. While we know that we have effects
-going on in Foo.myFunc, that's all we know, and as long as we acknowledge that,
-then GHC is satisfied. Since the correctness of this depends on something that
-we are not tracking in the type, the type system can' help us!
+class ModelConfig c where
+    type ServingInput c
+    type TrainingInput c
+    type Output c
+    type Error c
+    type Finalizer c
 
+    readModelConfig :: (MonadIO m) => PT.ModelFile -> m c
 
-# Slow
+    createModelHandle :: (MonadIO m, MonadMask m) => c -> m (ModelHandle' c, Finalizer c)
 
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-describe "Foo#my_func" do
-  it "adds inputs" do
-    User.insert(name: "Matt", age: 28)
-    expect(User.all.length).to eq(1)
-    expect(Foo.new.my_func(1,2)).to eq(4)
-    x = FooResult.find_by(x: 1, y: 2, z: 1)
-    expect(x).to_not be_nil
-  end
-end
-</code></pre></div>
+    createModelHandle' :: (MonadIO m, MonadMask m) => T.Tagged c ModelFile -> m (ModelHandle' c, Finalizer c)
+    createModelHandle' mf = do
+      c <- liftIO $ readModelConfig (T.untag mf)
+      createModelHandle @c c
 
-Note:
+    deleteModelHandle :: (MonadIO m, MonadMask m) => Finalizer c -> m ()
 
-So this isn't wrong anymore. However, the test relies on the database state, and
-has to do five SQL queries in order to verify the code. These tests are
-monstrously slow and will kill your TDD cycle, in addition to being fragile and
-annoying to write. Now you need to *also* write a bunch of database cleanup and
-state management code for your tests. Gross.
+type ModelHandle' c =  ModelHandle (TrainingInput c) (ServingInput c) (Output c) (Error c)
+```
+
+Note: Sometimes we want to attach richer type information to a handle. Like in this case where the input, output, error, and destructor types depend on the kind of model we're serving. So we use a type family to capture these dependencies. A type family is a sort of 'type level' function.
+This is probably the most complex slide in this talk, sorry.
 
 
-# Stubs!
-
-Note:
-
-The next "level up" that often happens is to take advantage of stubs or mocks.
-Let's look at that real quick:
+# Model Config API
 
 
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-describe "Foo" do
-  it "adds some numbers" do
-    x, y, z = 3, 4, 3
-    <span class="fragment">expect(User)
-      .to receive(:all)
-      .and_return([1,2,3])</span>
-    <span class="fragment">allow(FooResult)
-      .to receive(:insert).with(x, y, z)</span>
-    <span class="fragment">expect(Foo.new.my_func(x, y))
-      .to eq(x + y + z)</span>
-  end
-end
-</code></pre></div>
+```haskell
+import qualified Control.Exception.Safe as Safe
 
-Note:
+withModelConfig ::
+     forall c m r. (ModelConfig c, MonadIO m, MonadMask m)
+  => c
+  -> (ModelHandle' c -> m r)
+  -> m r
+withModelConfig c act =
+  Safe.bracket (createModelHandle c) (deleteModelHandle @c . snd) (act . fst)
 
-This test is a lot nicer. We start with some initial values we'll use. 
-We need to stub out the User.all method to ensure it returns a value that suits our expectation.
-We also need to stub out the FooResult class and verify that it receives the arguments we expect.
-Finally, we can do some assertions on the actual values involved.
+withModelFile ::
+     forall c m r. (ModelConfig c, MonadIO m, MonadMask m)
+  => ModelFile
+  -> (ModelHandle' c -> m r)
+  -> m r
+withModelFile mf act =
+  Safe.bracket
+    (createModelHandle' (T.Tagged mf :: T.Tagged c ModelFile))
+    (deleteModelHandle @c . snd)
+    (act . fst)
+```
 
-This kinda sucks! You can imagine extending this to more complex things, but it
-gets even uglier, pretty quickly. Furthermore, stubs and mocks are pretty
-controversial in the OOP community. They're not a clear best practice.
-
-
-# Stubs in Haskell
-
-Note:
-
-So stubbing global terms like this in Haskell? It's not possible. Sorry, or
-not, I guess, depending on whether you find the previous code disgusting or
-pleasantly concise.
-
-This is also not possible, or extremely difficult/annoying, in other langauges.
-So, rather than sticking with something that only works with Ruby, lets find
-something that we can use in most languages we might want to use.
+Note: With most of the complexity hidden in the modelconfig type family, our API becomes very clean & simple like before.
 
 
-# Dependency Injection?
+# Model Config API
 
-Note:
+```haskell
+withModelFile ::
+     forall c m r. (ModelConfig c, MonadIO m, MonadMask m)
+  => ModelFile
+  -> (ModelHandle' c -> m r)
+  -> m r
+withModelFile mf act =
+  Safe.bracket
+    (createModelHandle' (T.Tagged mf :: T.Tagged c ModelFile))
+    (deleteModelHandle @c . snd)
+    (act . fst)
+```
 
-Dependency injection is usually heralded as the solution or improvement to just
-stubbing out random global names. You define an interface (or duck type) for
-what your objects need and pass them in your object initializer
-
-
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-class Foo
-  <span class="fragment">def initialize(user, foo_result)
-    @user = user
-    @foo_result = foo_result
-  end</span>
-
-  def my_func(x, y)
-    z = @user.all.length        # effect!
-    result = x + y + z
-    @foo_result.insert(x, y, z) # effect!
-    result
-  end
-end
-</code></pre></div>
-
-Note:
-
-So here, instead of referring to the global term User and FooResult, we refer
-to instance variables.
-
-We provide these values to our class on initialization.
-
-Dependency injection can be used to make testing like this a little easier,
-especially in languages that aren't as flexible as Ruby (like Haskell). Instead
-of overriding a global name, you make the class depend on a parameter that's
-local. Instead of referring to the global User class, we're referring to the
-instance variable user which is ostensibly the same thing. This is Good, as
-we've reduced the coupling in our code, but we've introduced some significant
-extra complexity.  And the testing story isn't great, either:
+Note: With most of the complexity hidden in the modelconfig type family, our API becomes very clean & simple like before.
 
 
-<div id="lang-logo"> <img src="1000px-Ruby_logo.svg.png" id="lang"/> <pre><code class="lang-ruby hljs" data-trim data-noescape>
-describe "Foo" do
-  it "adds stuff" do
-    x, y, users = 2, 3, [1,2,3]
-    <span class="fragment">user = UserTest.new(users)
-    foo_result = FooResultTest.new
+# A TF Handle
 
-    foo = Foo.new(UserTest.new, FooResultTest.new)</span>
+```haskell
+import qualified TensorFlow.Core as TF
+import qualified Data.Vector as V
+import qualified Platform.Model.Types as Types
 
-    <span class="fragment">expect(foo_result.values).to include([x, y, 3])
-    expect(foo.my_func(x, y)).to eq(x + y + 3)</span>
-  end
-end
-</code></pre></div>
+type Label = (TF.TensorData Int32, TF.TensorData Int32)
 
-Note:
+type Embedding = Types.ModelHandle (Label,Label) (V.Vector Float)
 
-To test a dependency injection thing, first we initialize some values.
+data Config = Config { populationSize :: Word32, embeddingDim :: Word32 }
 
-Then we create our test versions of the dependencies, and initialize the foo class with these dudes.
+-- createHandle :: (MonadIO m, MonadMask m) => c -> m (ModelHandle (Input c) (Output c), Finalizer c)
+-- TF.runSessionWithOptions :: (MonadIO m, MonadMask m) => TF.Options -> TF.SessionT m a -> m a
+createHandle :: (MonadIO m, MonadMask m) => TF.Options -> Config -> m Embedding
+createHandle opts config = TF.runSessionWithOptions opts $ TF.build (createEmbedding config)
 
-Finally, we can make some assertions about the return value.
+createEmbedding :: Config -> TF.Build Embedding
+createEmbedding config = do
+    -- Use -1 batch size to support variable sized batches.
+    let batchSize = -1
+        populationSize' = populationSize config
+        embeddingDim' = embeddingDim config
 
-This is clearly worse than before. If we're going by the metric that easier to
-test code is better code, then this code *really* sucks. We're dependent on
-observing mutability and other complexities. So dependency injection is clearly
-not the obvious solution to this problem, though it does make our code more extensible.
+    customers <- TF.placeholder [batchSize, populationSize']
+    let custVecs = TF.oneHot customers (fromIntegral populationSize') 1 0
+
+    w1_init <- randomParam embeddingDim' [populationSize', embeddingDim']
+    w1 <- TF.initializedVariable w1_init
+    let embeddings = (custVecs `TF.matMul` TF.readValue w1) 
+
+    w2_init <- randomParam embeddingDim' [embeddingDim', populationSize']
+    w2 <- TF.initializedVariable w2_init
+    b2 <- TF.zeroInitializedVariable [populationSize']
+    let scores = (embeddings `TF.matMul` TF.readValue w2) `TF.add` TF.readValue b2
+
+    predictions <- TF.render @TF.Build @LabelType $
+                   TF.argMax (TF.softmax scores) (TF.scalar (1 :: LabelType))
+
+    -- Create training action.
+    labels <- TF.placeholder [batchSize]
+    let labelVecs = TF.oneHot labels (fromIntegral populationSize') 1 0
+        loss = TF.reduceMean $ fst $ TF.softmaxCrossEntropyWithLogits scores labelVecs
+        params = [w1, w2, b2] 
+
+    trainStep <- TF.minimizeWith TF.adam loss params
+
+    lossTensor <- TF.render loss
+    output <- TF.render embeddings
+    return Embedding  {
+          learn (inputs, outputs) = TF.runWithFeeds_ [
+                TF.feed customers inputs
+              , TF.feed labels outputs
+              ] trainStep
+        , predict (inputs, _)= TF.runWithFeeds [TF.feed customers inputs] $ TF.readValue w1
+        , loss (inputs, outputs) = TF.unScalar <$> TF.runWithFeeds [
+                TF.feed customers inputs
+              , TF.feed labels outputs
+              ] lossTensor
+        }
+```
+
+Note: that I'm simply creating the TF graph here. this requires no data dependencies
 
 
-# How to even do that in Haskell
-
-(it's just a function) <!-- .element: class="fragment" -->
-
-Note:
-
-So how do we even do that in Haskell? Well, everything is just a function, so you just pass functions.
+# A VW Handle
 
 
-<div id="lang-logo"><img src="haskell_logo.svg" id="lang"/><pre><code class="lang-haskell hljs" data-trim data-noescape>
-<span class="fragment">myFuncAbstract 
-    :: IO [a]               
-    -- ^ select users
-    -> (FooResult -> IO ()) 
-    -- ^ insert FooResult
-    -> Int -> Int -> IO Int 
-    -- ^ The rest of the function</span>
-myFuncAbstract <span class="fragment">selectUsers insert</span> x y = do
-    z <- fmap length selectUsers
-    insert (FooResult x y z)
-    pure (x + y + z)
-
-myFunc = myFuncAbstract DB.selectUsers DB.insert
-</code></pre></div>
-
-Note:
-
-The type signature changes -- now, instead of doing the work directly, we defer to functions that we accept as parameters.
-
-Here we make selectUsers and insert into functions that we pass in, and for the
-real version, we provide the database functions. The tested version can provide 
-different functions based on what you want to test.
-
-This is about as awkward as the OOP Version! Alas.
-There has to be something better.
-If we could only make testing our effects as easy as testing our values... then we'd be set!
