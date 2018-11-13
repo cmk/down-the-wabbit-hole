@@ -39,7 +39,7 @@ late.
 
 Testability -- this is a really good metric for good code!
 Testing code is often the first time that you go to actually use the code you wrote.
-It's the first time you have to setup the surrounding code and infrastructure, and you get immediate feedback on how good your code is to reuse.
+the more general your code is the more leverage your tests have
 
 
 # Reproducibility
@@ -62,6 +62,10 @@ This is one most people are aware of. ML code often contains hidden configuratio
 
 <aside class="notes">
 
+i'm going to spend the rest of this talk describing how we used haskell to get the best of both worlds
+this talk was origininally 60 min, so ive had to relegate about a third of the slides to several appendices
+there's three appendices w/ some notes on reader & cont monads, exceptions in haskell / bracket & mask functions, and prisms & numerical refinement types 
+if there's something that looks confusing in the talk you might want to check there.
 </aside>
 
 
@@ -69,5 +73,4 @@ This is one most people are aware of. ML code often contains hidden configuratio
 
 ![](vw.png) 
 <!-- .element: class="fragment" -->
-
 

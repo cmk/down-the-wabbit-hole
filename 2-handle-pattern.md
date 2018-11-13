@@ -1,11 +1,11 @@
 # The Handle Pattern
 
-<!-- .element: class="fragment" -->
 * Encapsulating and hiding state inside objects
 <!-- .element: class="fragment" -->
 * Providing methods to manipulate this state rather than touching it directly
 <!-- .element: class="fragment" -->
 * Providing interfaces for configuration, creation, and destruction of objects
+<!-- .element: class="fragment" -->
 
 Note:
 
@@ -16,8 +16,8 @@ In Haskell, we try to capture ideas in beautiful, pure and mathematically sound 
 
 # Sounds Like OO?
 
-<!-- .element: class="fragment" -->
 https://softwareengineering.stackexchange.com/questions/46592/so-what-did-alan-kay-really-mean-by-the-term-object-oriented
+<!-- .element: class="fragment" -->
 
 Note:
 
@@ -194,6 +194,7 @@ withSourceConfig c act =
 
 Note: With our SourceConfig typefamily, we are able to define functions using it. Here is the most general one.
 
+- forall proves that this function can be used w/ any sourceconfig that supplies a suitable m.
 - 'with*' pattern and callback / cont passing style
 - MonadResource and MonadUnliftIO
 - brackets
@@ -246,17 +247,21 @@ Note:  In practice we place an additional MonadReader constraint on the handle t
 # Parametrized Handles
 
 ```haskell
-data ModelHandle m i j o e = ModelHandle {
-     score :: i -> m o
-   , learn :: j -> m ()
-   , error :: j -> m e 
+module Policy.Model.Types where
+
+data ModelHandle i j o e m = ModelHandle {
+     learn :: i -> m ()
+   , score :: j -> m o
+   , error :: i -> m e 
 }
 ```
 
 Note:
 A MonadIO constraint is typically placed on m by callers.
 
-Separate training and serving inputs. Error type is used to drive SGD behavior.
+- Separate training and serving inputs. 
+- Used for both supervised learning (cust embeddings) and rl
+- Error type is used to drive early stopping behavior w SGD.
 
 Since there are so many type parameters configuration
 
@@ -266,26 +271,24 @@ Since there are so many type parameters configuration
 ```haskell
 {-# LANGUAGE TypeFamilies     #-}
 {-# LANGUAGE TypeApplications #-}
+module Policy.Model.Types where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Exception.Safe (MonadMask)
+import Policy.Source.Types as PT
+
+type ModelHandle' c m =  ModelHandle (TrainingInput c) (ServingInput c) (Output c) (Error c) m
 
 class ModelConfig c where
-    type ServingInput c
     type TrainingInput c
+    type ServingInput c
     type Output c
     type Error c
     type Finalizer c
 
-    readModelConfig :: (MonadIO m) => PT.ModelFile -> m c
-
-    writeModelConfig :: (MonadIO m) => PT.ModelFile -> c -> m ()
-
-    createModelHandle :: (MonadIO m, MonadMask m) => c -> m (ModelHandle' c, Finalizer c)
-
+    createModelHandle :: (MonadIO m, MonadMask m) => c -> m (ModelHandle' c m, Finalizer c)
     deleteModelHandle :: (MonadIO m, MonadMask m) => Finalizer c -> m ()
-
-type ModelHandle' c =  ModelHandle (ServingInput c) (TrainingInput c) (Output c) (Error c)
+    ...
 ```
 
 Note: 
@@ -296,9 +299,11 @@ Note:
 - we provide a simple type alias to hide the dependant typing
 
 
-# Model Config API
+# Parametrized Handles
 
 ```haskell
+module Policy.Model.API where 
+
 import qualified Control.Exception.Safe as Safe
 
 withModelConfig ::
@@ -311,72 +316,5 @@ withModelConfig c act =
 ```
 
 Note: With most of the complexity hidden in the modelconfig type family, our API becomes very clean & simple like before.
-I'll say more about the bracket function later in the talk.
 
 
-# A TF Handle
-
-```haskell
-import qualified TensorFlow.Core as TF
-import qualified Data.Vector as V
-import qualified Platform.Model.Types as Types
-
-type Label = (TF.TensorData Int32, TF.TensorData Int32)
-
-type Embedding = Types.ModelHandle (Label,Label) (V.Vector Float)
-
-data Config = Config { populationSize :: Word32, embeddingDim :: Word32 }
-
--- createHandle :: (MonadIO m, MonadMask m) => c -> m (ModelHandle (Input c) (Output c), Finalizer c)
--- TF.runSessionWithOptions :: (MonadIO m, MonadMask m) => TF.Options -> TF.SessionT m a -> m a
-createHandle :: (MonadIO m, MonadMask m) => TF.Options -> Config -> m Embedding
-createHandle opts config = TF.runSessionWithOptions opts $ TF.build (createEmbedding config)
-
-createEmbedding :: Config -> TF.Build Embedding
-createEmbedding config = do
-    -- Use -1 batch size to support variable sized batches.
-    let batchSize = -1
-        populationSize' = populationSize config
-        embeddingDim' = embeddingDim config
-
-    customers <- TF.placeholder [batchSize, populationSize']
-    let custVecs = TF.oneHot customers (fromIntegral populationSize') 1 0
-
-    w1_init <- randomParam embeddingDim' [populationSize', embeddingDim']
-    w1 <- TF.initializedVariable w1_init
-    let embeddings = (custVecs `TF.matMul` TF.readValue w1) 
-
-    w2_init <- randomParam embeddingDim' [embeddingDim', populationSize']
-    w2 <- TF.initializedVariable w2_init
-    b2 <- TF.zeroInitializedVariable [populationSize']
-    let scores = (embeddings `TF.matMul` TF.readValue w2) `TF.add` TF.readValue b2
-
-    predictions <- TF.render @TF.Build @LabelType $
-                   TF.argMax (TF.softmax scores) (TF.scalar (1 :: LabelType))
-
-    -- Create training action.
-    labels <- TF.placeholder [batchSize]
-    let labelVecs = TF.oneHot labels (fromIntegral populationSize') 1 0
-        loss = TF.reduceMean $ fst $ TF.softmaxCrossEntropyWithLogits scores labelVecs
-        params = [w1, w2, b2] 
-
-    trainStep <- TF.minimizeWith TF.adam loss params
-
-    lossTensor <- TF.render loss
-    output <- TF.render embeddings
-    return Embedding  {
-          learn (inputs, outputs) = TF.runWithFeeds_ [
-                TF.feed customers inputs
-              , TF.feed labels outputs
-              ] trainStep
-        , predict (inputs, _)= TF.runWithFeeds [TF.feed customers inputs] $ TF.readValue w1
-        , loss (inputs, outputs) = TF.unScalar <$> TF.runWithFeeds [
-                TF.feed customers inputs
-              , TF.feed labels outputs
-              ] lossTensor
-        }
-```
-
-Note: that I'm simply creating the TF graph here. this requires no data dependencies
-
-https://github.com/tensorflow/haskell/blob/master/tensorflow-ops/tests/RegressionTest.hs
