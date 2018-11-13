@@ -92,7 +92,6 @@ What is Vowpal Wabbit? - John Langford , Fast gradient descent library, bandits
 
 
 # 
-
 ```
 # Test 19: neural network 3-parity with 2 hidden units
 vw  -k -c -d train-sets/3parity --hash all --passes 3000 \ 

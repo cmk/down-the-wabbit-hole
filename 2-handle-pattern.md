@@ -1,5 +1,7 @@
 # The Handle Pattern
 
+https://jaspervdj.be/posts/2018-03-08-handle-pattern.html
+
 * Encapsulating and hiding state inside objects
 <!-- .element: class="fragment" -->
 * Providing methods to manipulate this state rather than touching it directly
@@ -13,17 +15,9 @@ Haskell design patterns are sortof a blogosphere phenom, so I'll include some li
 
 In Haskell, we try to capture ideas in beautiful, pure and mathematically sound patterns, for example Monoids. But at other times, we can’t do that. We might be dealing with some inherently mutable state, or we are simply dealing with external code which doesn’t behave nicely.
 
-
-# Sounds Like OO?
-
-https://softwareengineering.stackexchange.com/questions/46592/so-what-did-alan-kay-really-mean-by-the-term-object-oriented
-<!-- .element: class="fragment" -->
-
-Note:
-
 In those cases, we need another approach. What we’re going to describe feels a bit similar to Object Oriented Programming.
 
-As you can see, it is not exactly the same as Alan Kay’s original definition of OOP, but it is far from the horrible incidents that permeate our field such as UML, abstract factory factories and broken subtyping.
+Pretty much any sort of Haskell code can be written in this particular way, but that doesn’t mean that you should. This method relies heavily on IO. Whenever you can write things in a pure way, you should attempt to do that and avoid IO. This pattern is only useful when IO is required
 
 
 # A Handle
@@ -33,7 +27,7 @@ data DatabaseHandle = DatabaseHandle {
      hPool   :: Pool Postgres.Connection
    , hCache  :: IORef (PSQueue Int Text User)
    , hLogger :: Logger.Handle  -- Another handle!
-   , …
+   , ...
 }
 ```
 
@@ -46,18 +40,22 @@ Note: It's also possible to do more involved operations involving other handles,
 module Policy.Source.Types where
 
 data SourceHandle = SourceHandle {
-     loadModel :: ModelName -> Maybe ModelVersion -> IO (Either SourceError ModelFile)
-    -- ^ Load a model file onto the local file system. If no version is provided get the latest version.
-   , saveModel :: ModelName -> ModelFile -> IO (Either SourceError ModelVersion)
-    -- ^ Save a model file, bumping the latest version.
-   , listModelVersions :: ModelName -> IO (Either SourceError [ModelVersion])
-    -- ^ List all available versions for a given model.
+    loadModel :: ModelName -> 
+                 Maybe ModelVersion -> 
+                 IO (Either SourceError ModelFile)
+  , saveModel :: ModelName -> 
+                 ModelFile -> 
+                 IO (Either SourceError ModelVersion)
+  , listModelVersions :: ModelName -> 
+                         IO (Either SourceError [ModelVersion])
 }
 
-newtype ModelFile = ModelFile { unModelFile :: FilePath } 
 ```
-
 Note:
+- -- ^ Load a model file onto the local file system. If no version is provided get the latest version.
+- Save a model file, bumping the latest version.
+List all available versions for a given model.
+newtype ModelFile = ModelFile { unModelFile :: FilePath } 
 
 We use TFS at work to serve a wide variety of models. TFS expects a model to consist of a directory w/ subdirs for each version. So we tend to use this format everywhere. 
 
@@ -88,29 +86,29 @@ A MonadIO constraint is typically placed on m by callers.
 Since there are so many type parameters configuration
 
 
-#  Parametrized Handles
+#  
 
 ```haskell
-{-# LANGUAGE TypeFamilies     #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}                      -- 1
 module Policy.Model.Types where
 
-import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Exception.Safe (MonadMask)
-import Policy.Source.Types as PT
-
-type ModelHandle' c m =  ModelHandle (TrainingInput c) (ServingInput c) (Output c) (Error c) m
-
 class ModelConfig c where
-    type TrainingInput c
-    type ServingInput c
-    type Output c
-    type Error c
-    type Finalizer c
+  type TrainingInput c                             -- 2
+  type ServingInput c
+  type Output c
+  type Error c
+  type Finalizer c
 
-    createModelHandle :: (MonadIO m, MonadMask m) => c -> m (ModelHandle' c m, Finalizer c)
-    deleteModelHandle :: (MonadIO m, MonadMask m) => Finalizer c -> m ()
-    ...
+  createModelHandle :: (MonadIO m, MonadMask m)    -- 3
+                    => c 
+                    -> m (ModelHandle' c m, Finalizer c)
+  deleteModelHandle :: (MonadIO m, MonadMask m) 
+                    => Finalizer c -> m ()
+
+type ModelHandle' c m = ModelHandle (TrainingInput c) 
+                                    (ServingInput c) 
+                                    (Output c) 
+                                    (Error c) m
 ```
 
 Note: 
@@ -121,20 +119,23 @@ Note:
 - we provide a simple type alias to hide the dependant typing
 
 
-# Parametrized Handles
+#  
 
 ```haskell
+{-# LANGUAGE TypeApplications #-}                  
 module Policy.Model.API where 
 
 import qualified Control.Exception.Safe as Safe
 
 withModelConfig ::
-     forall c m r. (ModelConfig c, MonadIO m, MonadMask m)
+  forall c m r. (ModelConfig c, MonadIO m, MonadMask m)
   => c
   -> (ModelHandle' c -> m r)
   -> m r
 withModelConfig c act =
-  Safe.bracket (createModelHandle c) (deleteModelHandle @c . snd) (act . fst)
+  Safe.bracket (createModelHandle c) 
+               (deleteModelHandle @c . snd)          
+               (act . fst)
 ```
 
 Note: With most of the complexity hidden in the modelconfig type family, our API becomes very clean & simple like before.
