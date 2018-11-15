@@ -77,7 +77,7 @@ updateLearnInfo v handle input info =
   where
    t = do
      err <- M.error handle input                   -- 2
-     let i = info { modelLoss = err ^. get }     -- 3
+     let i = info { modelLoss = err ^. get }       -- 3
      logLearningInfo i                             -- 4
      pure i                                        -- 5
 ```
@@ -303,7 +303,7 @@ Note:
 # 
 
 ```haskell
-import Control.Monad.Trans.Control (liftWith)      -- 4
+import Control.Monad.Trans.Control (liftWith)      -- 3
 
 train :: 
   forall c m. (Ips c, Holdout c, MonadIO m, MonadMask m)
@@ -315,7 +315,7 @@ train mc lh inputs = void $
   liftWith $ \r -> M.withModelConfig mc $ r . act  -- 2
   where 
     runFold s s' = C.runConduit (s .| s' .| C.last)
-    act mh = do                                    -- 3
+    act mh = do                                    -- 4
       minfo <- runFold inputs $ trainFoldM @c mh lh 
       let tinfo = fromMaybe mempty minfo
       logTrainingInfo tinfo
@@ -329,10 +329,10 @@ last :: Monad m => CT i o m (Maybe i)
 
 Note: 
 - takes a stream of data inputs from somewhere (hadoop shuffle step)
-- can use the withModelConfig function we defined earlier to bracket the operation!
+- i told you way back at slide 10 or so that we would use withModelConfig before the end. this is the end. 
+- recall that monadMask was required to run withModelConfig. liftWith lifts the entire computation into a masked state
 - runConduit executes the entire stream, returning the r 
 - we'd kept r empty the entire time. last is going to grab the accumulated logs
-- we write the logs out (or blanks if they dont exist) and exit!
-- recall that monadMask required to run withModelConfig. liftWith lifts the entire computation into a masked state
+- we write the logs out (or empties if they dont exist) and exit!
 
 
