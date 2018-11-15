@@ -90,8 +90,8 @@ our data scientists understood how to use it
 it is far too complex to reimplement quickly, and even if we did we had very little assurance that our use case would be the same when we finished
 our engineering solution was to establish common APIs to wrap it
 allows supporting code to be more reusable and reduces the cost of changing packages.
-i'll explain one of the design patterns we used to do this
+in this talk i'll explain how we use haskell's type system and some design patterns to accomplish this
 show how it works w/ tensorflow and vw
-finally go through a use case with some supporting code
+finally go through a use case with some supporting library code
 
 

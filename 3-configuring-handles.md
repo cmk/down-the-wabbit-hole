@@ -1,9 +1,9 @@
-# Creating a TF Handle
+# Configuring Handles
 
 Note:
 
 
-# 
+## Configuring a TF Handle 
 ```haskell
 module Policy.Model.TF.Simple.Config where
 
@@ -14,8 +14,8 @@ data Simple = Simple { unSimple :: TFModelConfig } -- 1
 type Float' = TF.TensorData Float                  -- 2
 
 class ModelConfig SimpleTF where
-    type ServingInput  Simple = Float'            
-    type TrainingInput Simple = (Float', Float')   -- 3
+    type SInput  Simple = Float'            
+    type TInput Simple = (Float', Float')   -- 3
     type Output        Simple = Float             
     type Error         Simple = Float
 
@@ -87,18 +87,7 @@ Note: here's a simple single variable regression model y = mx + b
 - Theres a TF model config more complex but lets stick to a simpler framework
 
 
-# Creating a VW Handle
-
-Note:
-What is Vowpal Wabbit? 
-Fast impl of sgd with some pre-defined models incl contextual bandits
-under the hood both VW and TF are wrapping C & C++ code. 
-main diff is that TF was intended to be used w/ language bindings, 
-wheras VW configurability is limited a (very large) set of configuration flags
-going to take you on a little digression through some low level code
-
-
-# 
+## Configuring a VW Handle
 ```
 # Test 22: matrix factorization -- training
 vw  -k -d train-sets/ml100k_small_train -b 16 -q ui --rank 10 \
@@ -416,10 +405,10 @@ import qualified Policy.Framework.VW.FFI as F
 newtype Finalizer = Finalizer { unFinalizer :: IO () }
 
 instance ModelConfig (VWModelConfig i j o e) where
-  type TrainingInput (VWModelConfig i j o e) = i
-  type ServingInput  (VWModelConfig i j o e) = j
-  type Output        (VWModelConfig i j o e) = o
-  type Error     (VWModelConfig i j o e) = F.Statistics
+  type TInput (VWModelConfig i j o e) = i
+  type SInput (VWModelConfig i j o e) = j
+  type Output (VWModelConfig i j o e) = o
+  type Error  (VWModelConfig i j o e) = F.Statistics
   type Finalizer (VWModelConfig i j o e) = Finalizer
 
   createModelHandle = createModelHandle' 

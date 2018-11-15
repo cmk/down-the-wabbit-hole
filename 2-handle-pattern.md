@@ -78,8 +78,8 @@ Error type is used to drive early stopping behavior w SGD.
 module Policy.Model.Types where
 
 class ModelConfig c where
-  type TrainingInput c                             
-  type ServingInput c
+  type LInput c                             
+  type SInput c
   type Output c
   type Error c
   type Finalizer c
@@ -90,10 +90,8 @@ class ModelConfig c where
   deleteModelHandle :: (MonadIO m, MonadMask m) 
                     => Finalizer c -> m ()
 
-type ModelHandle' c m = ModelHandle (TrainingInput c) 
-                                    (ServingInput c) 
-                                    (Output c) 
-                                    (Error c) m    -- 3
+type ModelHandle' c m = 
+ModelHandle (LInput c) (SInput c) (Output c) (Error c) m 
 ```
 
 Note: 
@@ -103,7 +101,7 @@ it uses type families. which provide a limited form of type-level functions in h
 so the five types listed there depend on the implementing type c.
 so create model will specialize the type of modelhandle' and finalizer
 - here are those constraints i mentioned earlier. the monadmask constraint on the handle provides for async exception handling. all implementations of this interface involve bindings to C or C++ libraries, 
-- finally we provide a simple type alias to hide the dependant typing
+- finally we provide a simple type alias to hide the dependant typing. 
 
 
 #  

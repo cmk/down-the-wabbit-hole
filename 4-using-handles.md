@@ -37,46 +37,32 @@ Note:
 - we actually use a version w/ two type params, flipped so that we can partially apply the class on the target type, similar to the versions above.
 
 
-# OK 
+## Learning Logger
 ```haskell
+import qualified Policy.Model.Types as M
+
 newtype Loss = Loss { unLoss :: Float }
 
 -- | Diagnostic information from learning actions.
 data LInfo = LInfo {
-      numExamples :: !Word64
-    , averageLoss :: !Loss
-    } deriving (Eq, Ord, Show)
+    numExamples :: !Word64
+  , modelLoss   :: !Loss
+  } deriving (Eq, Ord, Show)
+
+instance Monoid LInfo where ...
 ```
 <!-- .element: class="fragment" -->
 ```haskell
-type LLogger c m = M.ModelHandle' c m 
-                        -> LInfo 
-                        -> M.TrainingInput c 
-                        -> m LInfo
+type LLogger c m = 
+  M.ModelHandle' c m -> M.LInput c -> LInfo -> m LInfo
 ```
 <!-- .element: class="fragment" -->
 
 Note:  
-- talk about sgd
-- logger for learning phase of sgd
-- learn gets avg monoid?
+- generic code for running sgd jobs. it runs this jobs 'online' so to speak, meaning that we'll go back and forth between learning and scoring holdout data rather than doing all the holdout at the end. 
+- this approach makes using hadoop streaming and haskell very convenient.
+- LInfo keeps track of the number of examples seen and the average trainging error during the learning phase of sgd
 - LLogger uses the handle on the input and updates the LearnInfo
-
-
-# 
-
-```haskell
-data HInfo = HInfo {
-       totalHoldout :: !Word64
-     , sumLoss :: !Loss
-     } deriving 
-
-type HLogger = HInfo -> IO () 
-```
-
-Note: 
--- For holdout only. for RL pipelines we use a single scoring framework, which helps us compare TF and VW models. Pure haskell not configuration dependant
--- for learning only
 
 
 # 
@@ -86,25 +72,29 @@ updateLearnInfo ::
   (M.ModelConfig c, Get Loss (M.Error c), MonadIO m)
   => Verbosity
   -> LLogger c m 
-updateLearnInfo v handle info input = 
+updateLearnInfo v handle input info = 
   if check v (numExamples info) then t else pure info t
   where
    t = do
-     stats <- M.error handle input                 -- 3
-     let i = info { averageLoss = stats ^. get }   -- 4
-     logLearningInfo i                             -- 5
-     pure i
-
-check :: Verbosity -> Word64 -> Bool
-check (Verbosity per _) seen = seen `mod` per == 0 -- 2
+     err <- M.error handle input                   -- 2
+     let i = info { modelLoss = err ^. get }     -- 3
+     logLearningInfo i                             -- 4
+     pure i                                        -- 5
 ```
+```haskell
+check :: Verbosity -> Word64 -> Bool
+check (Verbosity per _) seen = seen `mod` per == 0
+```
+<!-- .element: class="fragment" -->
 
 Note: here's an example of an learn logger. note the get constraint.
 - forall means that this works for any config type c and any monad m such that
-- a check function looks at the number of examples seen so far, then either passes the info object along unchanged or else updates it, according to some verbosity setting
+  so long as the error type of my modelConfig is able to generate a Loss value. 
 - to update, we call the error function from our handle 
-- use the getter from the typeclass to produce a Loss 
+- use the getter from the typeclass to produce a Loss. for a TF model where the error was highly configurable this might just be an id function. for VW every instance is going to return a big statistics type, so the get instance here would compute the average loss from the statistics
 - write it to a log somewhere, need the monadIO constraint here
+- lift the result into the monad provided by the model handle. for vw is IO for tf is session
+- a check function looks at the number of examples seen so far, then either passes the info object along unchanged or else updates it, according to some verbosity setting
 
 
 # 
@@ -113,105 +103,130 @@ Note: here's an example of an learn logger. note the get constraint.
 module Policy.Learner.Train.RL where
 
 import Control.Monad.Trans.Class (lift)
-import Data.Conduit (ConduitT,(.|))                -- 1
+import Data.Conduit (ConduitT,(.|))                
 import qualified Data.Conduit.Combinators as C
 import qualified Policy.Model.Types as M
 ```
 ```haskell
-type CT i o m r= ConduitT i o m r                  -- 2
-
-learn :: forall c m. (M.ModelConfig c, MonadIO m)
-  => M.ModelHandle' c m
-  -> LLogger c m
-  -> CT (Word64, M.TrainingInput c) LInfo (ExceptT LError m) ()
-learn handle logger = 
-     C.iterM (lift . M.learn handle . snd)         -- 3
-  .| maintainInfo @c (logger handle)               -- 4
+type CT i o m r = ConduitT i o m r                 -- 1
 ```
 <!-- .element: class="fragment" -->
 ```haskell
-C.iterM :: Monad m => (a -> m ()) -> CT a a m ()
+learn :: forall c m. (M.ModelConfig c, MonadIO m)
+  => M.ModelHandle' c m
+  -> LLogger c m                                   -- 2
+  -> CT (Word64, M.LInput c) LInfo (ExceptT LError m) ()
+learn handle logger = 
+     C.iterM (lift . M.learn handle . snd)         -- 3
+  .| void (C.scanM (logger handle) mempty)         -- 4
+```
+<!-- .element: class="fragment" -->
+```haskell
+iterM :: Monad m => (a -> m ()) -> CT a a m ()
+scanM :: Monad m => (a -> b -> m b) -> b -> CT a b m b
 ```
 <!-- .element: class="fragment" -->
 
-Note: the type sig requires that this function work for all model configs w/ a monadIO instance
-- what is conduit? resource-managed streams, dot-pipe connects them, just like FS2 from scala
+Note: this is some library code that trains reinforcement learners
+- what is conduit? resource-managed streams, dot-pipe connects them like a unix pipe, just like FS2 from scala
 - ConduitT input output monad return. making an alias to keep code on screen as much as possible
   here input is (index, data), ouput is info, monad is a transformer stack, no final return value
-- take the training input and use the handle to learn on it, lift into ExceptT
-- maintainInfo just executes training logger function on the info and passes it along
+- take the training input and use the handle to learn on it, want everything in ExceptT so lift into it if the model handle isnt already using it
+- iterM keeps executing the handles learn funcing on the learning input and passing the input along
+- scanM is like a fold that generates intermediate values inside a monad. void discards the monadic return
+- finally note that learn isn't actually being passed c at all! but it's still able to do all of this type inference on it. that's b/c we're going to use a type application when we cann learn. 
+
+
+## Scoring Logger
+```haskell
+data SInfo = SInfo {
+       numExamples :: !Word64
+     , scoringLoss :: !Loss
+     } deriving 
+
+instance Monoid SInfo where ...
+
+type SLogger = SInfo -> IO () 
+```
+
+Note: 
+- SInfo is like LInfo but for tracking holdout statistics. 
+- main diff is that we are going to compute holdout loss ourselves rather than use the model handles error function
+- two reasons for using a single scoring framework, 
+- helps us compare models fairly.
+- for some models the scoring input doesn't include a label of anykind so theres no way for it to generate a holdout score. 
+- this is for production model configs for example. ensures that we don't accidentally pass labelled data to the agent.
 
 
 # 
 
 ```haskell
-{-# LANGUAGE ConstraintKinds #-}                   -- 1
+{-# LANGUAGE ConstraintKinds #-}                   -- 4
 import qualified Policy.Model.Types as M
-import qualified Policy.Types.Numeric as TN        -- 5
+import qualified Policy.Types.Numeric as TN        
 
-type RLModel c = 
+type Holdout c = 
   ( M.ModelConfig c, 
-    Get (M.ServingInput c) (M.TrainingInput c)     -- 2
+    Get (M.SInput c) (M.LInput c)                  -- 1
   )
 ```
 ```haskell
-type RLData c = 
+type Ips c = 
   ( M.ModelConfig c, 
-    Get TN.Action (M.Output c),                    -- 3
-    Get TN.Arp (M.TrainingInput c)                 -- 4
+    Get TN.Action (M.Output c),                    -- 2
+    Get TN.Arp    (M.LInput c)                     -- 3
   )
 ```
 <!-- .element: class="fragment" -->
 
 Note: if I want to do holdout though i need constraints
-- what is ConstraintKinds?
-- this constraint stipulates that we be able to isolate a set of unlabeled features from the. it ensures that we don't accidentally pass labelled data to the agent. we've actually been bitten by this before. 
-- this constraint says that the model output must have a selected an action for the agent to take
-- an Arp is a special kind of training input for doing off-policy learning with an inverse propensity sampler
-- Arps: it's important that training data itself be validated. we have a special set of types for that which i'll discuss in a bit
+- recall that we're sending training data through these streams, but i can only pass scoring input to the score function. so we need some way of getting a scoring input from a training input. for our simple TF model this would just mean dropping the first float in the tuple.   for a RL model it is significantly more complex.
+- but we still need to do evaluate the holdout score, that's what the Ips constraint allows for. ips stands for inverse propensity scorer, which is a way of doing off-policy learning with an 
+- Arp stands for action reward probability. 
+- ConstraintKinds is a language extension that allows us to create special kinds that represnt constraints on polymorpic types.
 
 
 # 
 
 ```haskell
-holdout :: forall c m. (RLData c, RLModel c, MonadIO m)
+holdout :: forall c m. (Ips c, Holdout c, MonadIO m)
   => M.ModelHandle' c m
-  -> HLogger
-  -> CT (Word64, M.TrainingInput c) HInfo (ExceptT LError m) ()
+  -> SLogger
+  -> CT (Word64, M.LInput c) SInfo (ExceptT LError m) ()
 holdout handle logger = 
        C.mapM score                                -- 1
     .| holdoutUpdate @c                            -- 3
     .| holdoutReport logger
   where score (idx, dat) = 
-    do out <- lift $ M.score handle (dat ^. get)    -- 2
-       pure (idx, dat, out)
+    do act <- lift $ M.score handle (dat ^. get)   -- 2
+       pure (idx, dat, act)
 ```
 ```haskell
-C.mapM :: Monad m => (a -> m b) -> CT a b m ()
+mapM :: Monad m => (a -> m b) -> CT a b m ()
 ```
 <!-- .element: class="fragment" -->
 
 Note: 
--- score is a conduit that consumes an index-input tuple and outputs a triple of index, input and the RL agent's selected action
--- this is where we use the Get (M.ServingInput c) (M.TrainingInput c) part of the RLModel constraint. we cant run the M.score function directly on in, since it is a training input. 
-   the get constraint shouldn't ever appear in model-serving code, since we don't have labels available at serving time.
--- finally, since by design the model itself has no way of determining its hold-out performance (since it never saw a label), we are going to determine holdout loss in a model-agnostic fashion
- score function returns a output that we're going to compare to the input in order to assess performance thus far. we could use the results of this to implement an early stopping criterion for a training job for example. i'll return to this part in a moment.
+- score is a conduit that consumes an index-input tuple and outputs a triple of index, input and the RL agent's selected action
+-- this is where we use the Holdout constraint. we cant run the M.score function directly on in, since it is a training input. 
+- the Holdout constraint shouldn't ever appear in model-serving code, since we don't have labels available at serving time.
+- finally, since by design the model itself has no way of determining its hold-out performance (since it never saw a label), we are going to determine holdout loss in a model-agnostic fashion
+ score function returns an action that we're going to compare to the input in order to assess performance thus far. 
 
 
 # 
 
 ```haskell
-holdoutUpdate :: forall c m. (RLData c, MonadIO m) -- 1
-  => CT (Word64, M.TrainingInput c, M.Output c) HInfo m ()
-holdoutUpdate = void $ C.scan updateHInfo mempty   -- 2
+holdoutUpdate :: forall c m. (Ips c, MonadIO m)    -- 1
+  => CT (Word64, M.LInput c, M.Output c) SInfo m ()
+holdoutUpdate = void $ C.scan updateSInfo mempty   -- 2
   where 
-    updateHInfo (_, in, out) !acc =
-      let delta = ips in out                       -- 3
-      in acc `mappend` HInfo 1 (realToFrac delta)  -- 4
+    updateSInfo (_, dat, act) !acc =
+      let delta = ips dat act                      -- 3
+      in acc `mappend` SInfo 1 (realToFrac delta)  -- 4
 ```
 ```haskell
-C.scan :: Monad m => (a -> b -> b) -> b -> CT a b m b
+scan :: Monad m => (a -> b -> b) -> b -> CT a b m b
 ```
 <!-- .element: class="fragment" -->
 
@@ -222,20 +237,21 @@ ips :: forall i o. (Get TN.Arp i, Get TN.Action o)
 <!-- .element: class="fragment" -->
 
 Note: 
--- We no longer need the RLModel constraint b/c the model has already acted. we still need the RLData constraint for our ips function
--- C.scan?
+-- We no longer need the Holdout constraint b/c the model has already acted. we still need the Ips constraint for our ips function
+-- C.scan is similar to scanM from before, but a pure version
 -- this is the critical part, requiring access to an arp. the definition of ips requires 
    a fair amount of explanation, so i'm going to skip it for now. there are slides on it in appendix C. happy to discuss after the talk though if anyone is interested
--- HInfo is analagous to LInfo, both have monoid instances
+-- SInfo is analagous to LInfo, both have monoid instances
+- we could use the results of this to implement an early stopping criterion for a training job for example. i'll return to this part in a moment.
 
 
 # Putting It All Together
 
 ```haskell
-data TrainingHandle c m = TrainingHandle {
-      holdoutStrategy :: HoldoutStrategy
-    , holdoutLogger   :: HLogger            
-    , learningLogger  :: LLogger c m        
+data TrainingLogger c m = TrainingLogger {
+      trainingStrategy :: Strategy
+    , scoringLogger    :: SLogger            
+    , learningLogger   :: LLogger c m        
     }
 ```
 <!-- .element: class="fragment" -->
@@ -245,23 +261,23 @@ Note:
 -- for learning only
 
 
-# 
+#  
 ```haskell
-type TInfo = Either HInfo LInfo                    -- 
+type TInfo = (SInfo, LInfo)                        -- 
 
 trainFoldM :: 
-  forall c m. (RLData c, RLModel c, MonadIO m)
+  forall c m. (Ips c, Holdout c, MonadIO m)
   => M.ModelHandle' c m
-  -> TrainingHandle c m                            -- 
-  -> CT (M.TrainingInput c) TInfo (ExceptT LError m) ()
+  -> TrainingLogger c m                            -- 
+  -> CT (M.LInput c) TInfo (ExceptT LError m) ()
 trainFoldM mh th =
        issueId 0
-    .| holdoutBranch (holdoutStrategy th)          -- 
+    .| holdoutBranch (trainingStrategy th)         -- 
     .| holdoutOrLearn                              -- 
     .| gatherInfo
   where
     holdoutOrLearn = getZipConduit $ l <* r        --
-    l = leftOnly $ holdout @c mh (holdoutLogger  th)
+    l = leftOnly $ holdout @c mh (scoringLogger  th)
     r = rightOnly $  learn @c mh (learningLogger th)
     leftOnly  = ZipConduit . C.filter isLeft
     rightOnly = ZipConduit . C.filter isRight
@@ -271,34 +287,51 @@ Note: doesn't need monadMask b/c it's already inside a mask
 
 
 # 
+```haskell
+type TInfo = (SInfo, LInfo)
+
+gatherInfo :: forall m. MonadIO m
+           => CT (Either SInfo LInfo) TInfo m ()
+gatherInfo = void $ C.scan gather mempty
+  where
+    gather (Left s')  !(s,l) = (s `mappend` s', l)
+    gather (Right l') !(s,l) = (s, l `mappend` l')
+```
+Note:
+
+
+# 
 
 ```haskell
-import Control.Monad.Trans.Control (liftWith)
-
+import Control.Monad.Trans.Control (liftWith)      -- 1
 train :: 
-  forall c m. (RLData c, RLModel c, MonadIO m, MonadMask m)
+  forall c m. (Ips c, Holdout c, MonadIO m, MonadMask m)
   => c                                                            
-  -> TrainingHandle c m                                               
-  -> CT () (M.TrainingInput c) (ExceptT LError m) ()
+  -> TrainingLogger c m                                               
+  -> CT () (M.LInput c) (ExceptT LError m) ()      -- 2
   -> ExceptT LError m ()
 train mc lh inputs = void $
   liftWith $ \run -> M.withModelConfig mc $ run . act
   where 
     runFold s s' = C.runConduit (s .| s' .| C.last)
-    act :: M.ModelHandle' c m -> ExceptT LearnerError m ()
+    act :: M.ModelHandle' c m -> ExceptT LError m ()
     act h = do
-      minfo <- runFold inputs $ trainFoldM @c h lh
+      minfo <- runFold inputs $ trainFoldM @c h lh -- 3
       let tinfo = fromMaybe mempty minfo
       logTrainingInfo tinfo
-      pure ()
+      pure ()                                      -- 4
 ```
+```haskell
+runConduit :: Monad m => CT () Void m r -> m r
+last :: Monad m => CT i o m (Maybe i)
+```
+<!-- .element: class="fragment" -->
 
 Note: 
-- can use the withModelConfig function we defined earlier to bracket the operation
-- monadMask required to run withModelConfig
-- last :: Monad m => ConduitT a o m (Maybe a)
-- runConduit :: Monad m => ConduitT () Void m r -> m r
-- liftWith :: (MonadTransControl t, Monad m) => (Run t -> m a) -> t m a 
-  lifts everything into 
+- can use the withModelConfig function we defined earlier to bracket the operation!
+- recall that monadMask required to run withModelConfig. liftWith lifts the entire computation into a masked state
+- runConduit executes the entire stream, returning the r 
+- we'd kept r empty the entire time. last is going to grab the accumulated logs
+- we write the logs out (or blanks if they dont exist) and exit!
 
 
