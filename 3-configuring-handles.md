@@ -14,10 +14,10 @@ data Simple = Simple { unSimple :: TFModelConfig } -- 1
 type Float' = TF.TensorData Float                  -- 2
 
 class ModelConfig SimpleTF where
-    type SInput  Simple = Float'            
-    type TInput Simple = (Float', Float')   -- 3
-    type Output        Simple = Float             
-    type Error         Simple = Float
+    type SInput Simple = Float'            
+    type LInput Simple = (Float', Float')          -- 3
+    type Output Simple = Float             
+    type Error  Simple = Float
 
     createModelHandle = TF.build . mkHandle        -- 4
     ...
@@ -78,13 +78,9 @@ mkHandle = do
 Note: here's a simple single variable regression model y = mx + b
 - Build is a State monad over the graph nodes. I'm simply creating the TF graph here. this requires no data dependencies
 - want variable input so i dont' couple my model definition to training details
-- render the output variables representing the dependant variable and error
+- render the output tensors representing the dependant variable and error. render fixes the name, scope, device and control inputs from the MonadBuild context. 
 - configure my optimization step. standard sgd is fine for something this simple. for more complex models i would probably want to store the opt hyperparameters in the configuration type.
 - ran out of room but the creating the model handle is simply a matter of attaching the rendered variables to the x and y data feeds
-          learn = \(x',y') -> TF.runWithFeeds_ [TF.feed x x', TF.feed y y'] learn'
-        , score = \x' -> TF.unScalar <$> TF.runWithFeeds [TF.feed x x'] score'
-        , error = \(x',y') -> TF.unScalar <$> TF.runWithFeeds [TF.feed x x', TF.feed y y'] error'
-- Theres a TF model config more complex but lets stick to a simpler framework
 
 
 ## Configuring a VW Handle
@@ -108,11 +104,14 @@ vw  --cb_explore_adf --epsilon 0.1 -d train-sets/cb_test.ldf \
 <!-- .element: class="fragment" -->
 
 Note:
+- now lets look at a vw instance. is is similar to TF in that both are designed around SGD and its relatives, both are C++. 
+- vw is in many ways opposite to TF. CLI only, can't make up new models.
 - here we are using sgd to train a collaborative filtering model
-- most relevant for us is the contextual bandit use case. 
-  we're reading in a data file cb_test.ldf and training an adf model w/ sgd
-  we're also generating predictions and error / stats logs as we go
+- most relevant for us is the contextual bandit use case with action-dependant features (adf).
+- we're reading in a data file cb_test.ldf and training an adf model w/ sgd
+- we're also generating predictions and error / stats logs as we go
 - the aim of the rest of this talk is to show how we productionize this exact use case
+- i'm going to start at the FFI level and work my way up
 
 
 #  
@@ -190,28 +189,29 @@ import qualified Policy.Framework.VW.FFI as F
 
 processLines
   ::  ByteString                           
-  -> (F.Session -> F.Example -> IO ()) -- vw action           
-  -> (F.Example -> IO b)               -- extractor
+  -> (F.Session -> F.Example -> IO ())             -- 1        
+  -> (F.Example -> IO b)              
   -> [ByteString]                              
   -> IO [b]
 processLines opts act out dats =
-  F.withSession opts                               
-  (\ses -> forM dats                               
-    (\bs -> F.withExample ses bs
-      (\ex -> act ses ex >> out ex)))
+  F.withSession opts                               -- 2
+    (\ses -> forM dats                               
+      (\bs -> F.withExample ses bs
+        (\ex -> act ses ex >> out ex)))            -- 3
 ```
-Note:
-- using withSession describe action
-- not great still b/c my options are untyped bytestring
-- my input is an untyped list of bytestring
-- im handling raw Sessions 
+Note: here's an example of a function i could write w/ my low-level API
+- consume an action function, either predict, learn, or some combination
+- using withSession to configure vw and generate a session handle ses
+- for each example in the dataset i call withExample
+- finally using the action to learn/predict and call out on the example pointer
+- bracketing twice, once at the session level and once at the example level
 
 
 # 
 ```haskell
 ghci> dat = "1 |s a^the n^man |t a^un n^homme"
 ghci> opts = "--quiet -q st --noconstant"
-ghci> act ses ex = F.learn ses ex *> F.predict ses ex
+ghci> act ses ex = F.learn ses ex >> F.predict ses ex
 ```
 ```haskell
 ghci> out = F.getScalarPrediction 
@@ -229,7 +229,7 @@ ghci> processLines opts act out $ replicate 5 dat
 [0.7567993,0.9384576,0.9843892,0.9960399,0.99899566]
 ```
 <!-- .element: class="fragment" -->
-Note: 
+Note: let's see how this works
 - i have a bytestring dat in vw input format (which derives from old libsvm data format). 
 - i have a label '1' and two named groups of features
 - i have some CL args
@@ -237,6 +237,10 @@ Note:
 - here's an extractor function, which copies the example buffer out of VW memory and produces a float
 - if i train and predict on one copy of the data i get a probability, this is b/c vw has decided that what i wanted to do was train a logistic regression model
 - you can see if i train on multiple copies then the probs get progressively closer to 1 as i overfit the data
+
+this is still too low-level though. configuration is implicit and there are no static checks of any kind.
+- my input is an untyped list of bytestring
+- my options are untyped bytestring
 - count the things are happening implicitly: 
 - feature engineering (one-hot, quadratic combination),
 - class label, s & t are named feature groups, -q st combines the groups quadratically
@@ -255,9 +259,9 @@ import qualified Policy.Framework.VW.FFI as F
 processLines
   ::  ByteString                           
   -> (F.Session -> F.Example -> IO ())             -- 2    
-  -> (F.Example -> IO b)                           -- 3
+  -> (F.Example -> IO o)                           -- 3
   -> [ByteString]                              
-  -> IO [b]
+  -> IO [o]
 processLines opts act out dats =
   F.withSession opts                               -- 1
     (\ses -> forM dats                               
@@ -269,39 +273,40 @@ Note:
 - we also have a common pattern in the type signatures of the arguments
 - Example -> IO something 
 - we can use this to abstract away some of the cps pattern behind a continuation monad 
-- then build some combinators in that monad to handle serialization for us
+- then build some combinators in that monad to provide some compile-time guaruntees.
 
 
 # 
 ```haskell
 ghci> :t ContT
-ContT :: ((a -> m r) -> m r) -> ContT r m a
+ContT :: ((e -> m o) -> m o) -> ContT o m e
 ```
 ```haskell
 ghci> :t ContT @_ @IO @Example
 ContT @_ @IO @Example
- :: ((Example -> IO r) -> IO r) -> ContT r IO Example
+ :: ((Example -> IO o) -> IO o) -> ContT o IO Example
 ```
 <!-- .element: class="fragment" -->
 ```haskell
 ghci> :t withExample 
 withExample
- :: Session -> ByteString -> (Example -> IO r) -> IO r
+ :: Session -> ByteString -> (Example -> IO o) -> IO o
 ```
 <!-- .element: class="fragment" -->
 ```haskell
 ghci> :t \ses -> ContT . withExample ses
 \ses -> ContT . withExample ses
- :: Session -> ByteString -> ContT r IO Example
+ :: Session -> ByteString -> ContT o IO Example
 ```
 <!-- .element: class="fragment" -->
 Note: 
 - ContT is a monad transformer that abstracts away continuations
+- it says that if you give me a a -> m r, then i'll give you an m r. which if you're familiar w/ the yoneda lemma is a lot like having an a.
 - adding some type applications to specialize to our types
 - compare this to withExample we just need to lift the last two pieces into the ContT
+- second half of withEx is the same as the first half of ContT
 - finally it consumes the bytestring and is still polymorphic in the return type r
-- this is nice b/c it's polymorphic in the return type r
-- going to give us the ability to package bracketed pointer operations with extractor functions and configure them together so that i can check at compile time that the types line w/ what VW is going to expect
+- going to give us the ability to package bracketed exampl epointer operations with extractor functions and configure them together so that i can check at compile time that the types line w/ what VW is going to expect
 
 
 # 
@@ -311,24 +316,22 @@ type VW i o e = F.Session -> i -> ContT o IO e
 ```
 ```haskell
 serialize :: forall o. VW ByteString o F.Example
-serialize ctx = ContT . F.withExample ctx
+serialize ses = ContT . F.withExample ses
 ```
 <!-- .element: class="fragment" -->
 ```haskell
-lift ::  MonadIO m 
+lift ::  
      => (F.Session -> F.Example -> IO ()) 
      -> (F.Example -> IO o) 
      ->  VW F.Example F.Example o
-lift act out ctx e = liftIO $ act ctx e >> out e
+lift act out ses e = liftIO $ act ses e >> out e
 ```
 <!-- .element: class="fragment" -->
 
 Note: 
-- here is the basic type i want to place restrictions on
-- here is the first restriction note the forall, means that it must work w/ any output type
-now i can lift those two types into serializers
-- execute a low-level VW function on an in-memory 'Example'. 
-- combine a learning 'Serializer' with an output function 'f'.
+- here is the basic type i want 
+- here is the first restriction note the forall, means that if i have a functions thats just serializing bytestring data into an example pointer, then it must support continuations that produce any output type. 
+- i can also take that pattern we used earlier and lift it into a VW type as well
 
 
 # 
@@ -342,14 +345,16 @@ processLines'
   -> [ByteString]                              
   ->  IO [b]
 processLines' opts act out dats =
-  F.withSession opts $ \ctx -> 
+  F.withSession opts $ \ses -> 
     evalContT $ do
-      exs <- forM dats $ serialize ctx 
-      forM exs $ lift act out ctx
+      exs <- forM dats $ serialize ses 
+      forM exs $ lift act out ses
 ```
 Note: 
-so with serialize and lift processLines is easier to reason about
-and i can build more complex serializers 
+- if i rewrite processLines serialize and lift the body of the function looks more monadic
+- for this function it's not clear how much of an improvement this it, but this isn't the target
+- but the actual payoff is that i can build more complex serializers 
+- and we'll see in a moment that i can use the type parameters in VW to enforce nice things 
 
 
 # 
@@ -370,9 +375,9 @@ serialize' ses (b :| bs) = do
     return $ e1 :!: e2 
 ```
 
-
-Note: for example, the VW mode we use most frequently requires non-empty vector of data inputs and a pair of example pointers that all interact in an odd way. 
-operates on the second 'Example' and stores results in the first 'Example'
+Note: here's the serializer function for the CB ADF use case i mentioned earlier 
+- ADF requires non-empty vector of data inputs and a pair of example pointers that all interact in an odd way. 
+- operates on the second 'Example' and stores results in the first 'Example'
 - A strict pair of 'Example' pointers to be used with ADF contextual bandit models only.
 - Parse the first line and hold onto its pointer.
 - Parse each remaining line, discarding pointers.
@@ -387,16 +392,17 @@ data VWModelConfig i j o e =
   VWModelConfig { options :: ByteString
                 , input   :: F.LabelType
                 , output  :: F.PredictType
-                , learn   :: VW e () ()
-                , learn'  :: forall o. VW i o e
-                , score   :: VW e o o
-                , score'  :: forall o. VW j o e
+                , learn   :: VW e () ()            -- 1
+                , learn'  :: forall o. VW i o e    -- 2
+                , score   :: VW e o o              -- 3
+                , score'  :: forall o. VW j o e    -- 4
                 }
 ```
 Note: finally we can create a model configuration type
 - the first three fields we've already seen
 - the last four fields encode all of the constraints we care about.
-  my two serializers learn' and score' arent allowed to touch the output, and my learn and score functions must release any pointer memory
+- my two serializers learn' and score' arent allowed to touch the output, and my learn and score functions must release any pointer memory
+
 
 # 
 ```haskell
@@ -405,17 +411,19 @@ import qualified Policy.Framework.VW.FFI as F
 newtype Finalizer = Finalizer { unFinalizer :: IO () }
 
 instance ModelConfig (VWModelConfig i j o e) where
-  type TInput (VWModelConfig i j o e) = i
+  type LInput (VWModelConfig i j o e) = i
   type SInput (VWModelConfig i j o e) = j
   type Output (VWModelConfig i j o e) = o
-  type Error  (VWModelConfig i j o e) = F.Statistics
+  type Error  (VWModelConfig i j o e) = F.Statistics --!
   type Finalizer (VWModelConfig i j o e) = Finalizer
 
   createModelHandle = createModelHandle' 
   deleteModelHandle = unFinalizer
 ```
 Note: 
+- e refers to the type of the serialized example, all VW models produce the same 
 - unlike TF, this instance of createModelHandle takes no arguments. there's no build graph to define
+- probably skip the details of creation and go to usage
 
 
 # 
@@ -455,8 +463,8 @@ mkHandle :: Session
 mkHandle sess sl l sp p = 
   ModelHandle l' p' (F.getStatistics sess) 
   where
-    l' = evalContT . (sl ctx >=> l ctx)
-    p' = evalContT . (sp ctx >=> p ctx)
+    l' = evalContT . (sl ses >=> l ses)
+    p' = evalContT . (sp ses >=> p ses)
 ```
 Note: finally mkHandle puts the handle together by evaluating the continuations to construct the learn and score functions, and calling the FFI for the error function. the monad is bound to IO b/c we're using the FFI directly 
 
