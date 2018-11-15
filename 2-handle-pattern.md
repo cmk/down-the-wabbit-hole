@@ -1,37 +1,27 @@
 # The Handle Pattern
 
-https://jaspervdj.be/posts/2018-03-08-handle-pattern.html
+Note:
 
+Haskell design patterns are a blogosphere phenom, so I'll include some links at the end of the talk.
+The ones you've heard about are probably beautiful and mathematically sound. My colleague Greg Phiel is giving a talk on that kind of thing on Saturday that you should check out. 
+
+However w/ bindings to ML libraries we are dealing with inherently mutable state, and external code which doesn’t behave nicely.
+
+In those cases, we need another approach. What we’re going to describe feels a bit similar to Object Oriented Programming.
+
+
+# 
 * Encapsulating and hiding state inside objects
 <!-- .element: class="fragment" -->
 * Providing methods to manipulate this state rather than touching it directly
 <!-- .element: class="fragment" -->
 * Providing interfaces for configuration, creation, and destruction of objects
 <!-- .element: class="fragment" -->
-
 Note:
-
-Haskell design patterns are sortof a blogosphere phenom, so I'll include some links at the end of the talk.
-
-In Haskell, we try to capture ideas in beautiful, pure and mathematically sound patterns, for example Monoids. But at other times, we can’t do that. We might be dealing with some inherently mutable state, or we are simply dealing with external code which doesn’t behave nicely.
-
-In those cases, we need another approach. What we’re going to describe feels a bit similar to Object Oriented Programming.
-
-Pretty much any sort of Haskell code can be written in this particular way, but that doesn’t mean that you should. This method relies heavily on IO. Whenever you can write things in a pure way, you should attempt to do that and avoid IO. This pattern is only useful when IO is required
-
-
-# A Handle
-
-```haskell
-data DatabaseHandle = DatabaseHandle {
-     hPool   :: Pool Postgres.Connection
-   , hCache  :: IORef (PSQueue Int Text User)
-   , hLogger :: Logger.Handle  -- Another handle!
-   , ...
-}
-```
-
-Note: It's also possible to do more involved operations involving other handles, MVars, IORefs, TVars, Chans etc. We refrain from doing this.
+Pretty much any sort of Haskell code can be written in this particular way, but that doesn’t mean that you should. 
+This method relies heavily on IO. 
+Whenever you can write things in a pure way, you should attempt to do that and avoid IO. 
+This pattern is only useful when IO is required
 
 
 # A Simple Handle
@@ -49,22 +39,19 @@ data SourceHandle = SourceHandle {
   , listModelVersions :: ModelName -> 
                          IO (Either SourceError [ModelVersion])
 }
-
 ```
 Note:
-- -- ^ Load a model file onto the local file system. If no version is provided get the latest version.
-- Save a model file, bumping the latest version.
-List all available versions for a given model.
-newtype ModelFile = ModelFile { unModelFile :: FilePath } 
-
-We use TFS at work to serve a wide variety of models. TFS expects a model to consist of a directory w/ subdirs for each version. So we tend to use this format everywhere. 
-
-the purpose of this handle is to broker safe access to the underlying dir. by safe i mean that it maintains certain properties (ie if a model has n versions and you call saveModel it will now have n+1 versions)
-
-How is this sim/diff from a type class?
+This is a handle that represents a model location, either on the local filesystem, S3, a database,etc.
+We have 3 functions.
+We use TFS at work to serve a wide variety of models. 
+TFS expects a model to consist of a directory w/ subdirs for each version. 
+So we tend to use this format everywhere. 
+This handle needs to do 2 things behind the scenes: 
+- manage scare resources efficiently
+- ensure version integrity
 
 
-# Parametrized Handles
+# Polymorphic Handles
 
 ```haskell
 module Policy.Model.Types where
@@ -75,15 +62,13 @@ data ModelHandle i j o e m = ModelHandle {
    , error :: i -> m e 
 }
 ```
-
+<!-- .element: class="fragment" -->
 Note:
+Here is a 
 A MonadIO constraint is typically placed on m by callers.
-
-- Separate training and serving inputs. 
-- Used for both supervised learning (cust embeddings) and rl
-- Error type is used to drive early stopping behavior w SGD.
-
-Since there are so many type parameters configuration
+Separate training and serving inputs. 
+Used for both supervised learning (cust embeddings) and rl
+Error type is used to drive early stopping behavior w SGD.
 
 
 #  
@@ -93,13 +78,13 @@ Since there are so many type parameters configuration
 module Policy.Model.Types where
 
 class ModelConfig c where
-  type TrainingInput c                             -- 2
+  type TrainingInput c                             
   type ServingInput c
   type Output c
   type Error c
   type Finalizer c
 
-  createModelHandle :: (MonadIO m, MonadMask m)    -- 3
+  createModelHandle :: (MonadIO m, MonadMask m)    -- 2
                     => c 
                     -> m (ModelHandle' c m, Finalizer c)
   deleteModelHandle :: (MonadIO m, MonadMask m) 
@@ -108,15 +93,17 @@ class ModelConfig c where
 type ModelHandle' c m = ModelHandle (TrainingInput c) 
                                     (ServingInput c) 
                                     (Output c) 
-                                    (Error c) m
+                                    (Error c) m    -- 3
 ```
 
 Note: 
-
-- here are those monadIO constraints i mentioned earlier
-- several implementations of this interface involve bindings to C or C++ libraries, 
-- the monadmask constraint on the handle provides for async exception handling. I'll walk through one example of this later.
-- we provide a simple type alias to hide the dependant typing
+here is the typeclass that we use to manage handles. basically a handle factory.
+DESCRIBE create returns a tuple of the handle itself as well as a destructor
+it uses type families. which provide a limited form of type-level functions in haskell 
+so the five types listed there depend on the implementing type c.
+so create model will specialize the type of modelhandle' and finalizer
+- here are those constraints i mentioned earlier. the monadmask constraint on the handle provides for async exception handling. all implementations of this interface involve bindings to C or C++ libraries, 
+- finally we provide a simple type alias to hide the dependant typing
 
 
 #  
@@ -133,11 +120,20 @@ withModelConfig ::
   -> (ModelHandle' c -> m r)
   -> m r
 withModelConfig c act =
-  Safe.bracket (createModelHandle c) 
-               (deleteModelHandle @c . snd)          
+  Safe.bracket (createModelHandle c)               
+               (deleteModelHandle @c . snd)        -- 2 
                (act . fst)
 ```
-
-Note: With most of the complexity hidden in the modelconfig type family, our API becomes very clean & simple like before.
-
-
+```haskell
+bracket :: forall m a b c . MonadMask m =>         -- 1
+           m a -> (a -> m b) -> (a -> m c) -> m c
+```
+<!-- .element: class="fragment" -->
+Note: 
+heres an example from the api.
+we feed it a configuration and a handle action, and it creates the handle, performs the action, and deletes the handle in a resource-safe fashion.
+- uses what's referred to as the bracket pattern in haskell. like try / finally or with in python. 
+  the a type here is (ModelHandle' c m, Finalizer c)
+- the other lang extension we use a lot is called type applications. lets me pass type information explicitly. 
+- also note that i'm grabbing the finalizer 
+if i talk fast we'll see this in use in the last slide of the talk
