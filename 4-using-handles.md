@@ -330,7 +330,7 @@ last :: Monad m => CT i o m (Maybe i)
 Note: 
 - takes a stream of data inputs from somewhere (hadoop shuffle step)
 - i told you way back at slide 10 or so that we would use withModelConfig before the end. this is the end. 
-- recall that monadMask was required to run withModelConfig. liftWith lifts the entire computation into a masked state
+- recall that monadMask was required to run withModelConfig. liftWith lifts the entire computation into a masked state. this takes care of async exception handling.
 - runConduit executes the entire stream, returning the r 
 - we'd kept r empty the entire time. last is going to grab the accumulated logs
 - we write the logs out (or empties if they dont exist) and exit!

@@ -4,7 +4,7 @@ _fin_
 - garbage tweeting [@fnowarn](https://twitter.com/fnowarn)
 - slides https://cmk.github.io/down-the-wabbit-hole/
 
-
+![](formation.png) 
 
 Note:
 
