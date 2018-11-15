@@ -303,23 +303,23 @@ Note:
 # 
 
 ```haskell
-import Control.Monad.Trans.Control (liftWith)      -- 1
+import Control.Monad.Trans.Control (liftWith)      -- 4
+
 train :: 
   forall c m. (Ips c, Holdout c, MonadIO m, MonadMask m)
   => c                                                            
   -> TrainingLogger c m                                               
-  -> CT () (M.LInput c) (ExceptT LError m) ()      -- 2
+  -> CT () (M.LInput c) (ExceptT LError m) ()      -- 1
   -> ExceptT LError m ()
 train mc lh inputs = void $
-  liftWith $ \run -> M.withModelConfig mc $ run . act
+  liftWith $ \r -> M.withModelConfig mc $ r . act  -- 2
   where 
     runFold s s' = C.runConduit (s .| s' .| C.last)
-    act :: M.ModelHandle' c m -> ExceptT LError m ()
-    act h = do
-      minfo <- runFold inputs $ trainFoldM @c h lh -- 3
+    act mh = do                                    -- 3
+      minfo <- runFold inputs $ trainFoldM @c mh lh 
       let tinfo = fromMaybe mempty minfo
       logTrainingInfo tinfo
-      pure ()                                      -- 4
+      pure ()                                      
 ```
 ```haskell
 runConduit :: Monad m => CT () Void m r -> m r
@@ -328,10 +328,11 @@ last :: Monad m => CT i o m (Maybe i)
 <!-- .element: class="fragment" -->
 
 Note: 
+- takes a stream of data inputs from somewhere (hadoop shuffle step)
 - can use the withModelConfig function we defined earlier to bracket the operation!
-- recall that monadMask required to run withModelConfig. liftWith lifts the entire computation into a masked state
 - runConduit executes the entire stream, returning the r 
 - we'd kept r empty the entire time. last is going to grab the accumulated logs
 - we write the logs out (or blanks if they dont exist) and exit!
+- recall that monadMask required to run withModelConfig. liftWith lifts the entire computation into a masked state
 
 
