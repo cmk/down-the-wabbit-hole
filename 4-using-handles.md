@@ -2,8 +2,7 @@
 
 Note:
 - this section presents code from our codebase, some info obscured and slightly edited for clarity
-- still some idiosyncratic patterns, which i'll try and explain
-- ok if the implementation doesn't make much sense, important thing is to focus on the types / constraints
+- important thing is to focus on the types / constraints
 
 
 # Has Pattern 
@@ -208,7 +207,7 @@ mapM :: Monad m => (a -> m b) -> CT a b m ()
 
 Note: 
 - score is a conduit that consumes an index-input tuple and outputs a triple of index, input and the RL agent's selected action
--- this is where we use the Holdout constraint. we cant run the M.score function directly on in, since it is a training input. 
+- this is where we use the Holdout constraint. we cant run the M.score function directly on in, since it is a training input. 
 - the Holdout constraint shouldn't ever appear in model-serving code, since we don't have labels available at serving time.
 - finally, since by design the model itself has no way of determining its hold-out performance (since it never saw a label), we are going to determine holdout loss in a model-agnostic fashion
  score function returns an action that we're going to compare to the input in order to assess performance thus far. 
@@ -237,11 +236,11 @@ ips :: forall i o. (Get TN.Arp i, Get TN.Action o)
 <!-- .element: class="fragment" -->
 
 Note: 
--- We no longer need the Holdout constraint b/c the model has already acted. we still need the Ips constraint for our ips function
--- C.scan is similar to scanM from before, but a pure version
--- this is the critical part, requiring access to an arp. the definition of ips requires 
+- We no longer need the Holdout constraint b/c the model has already acted. we still need the Ips constraint for our ips function
+- C.scan is similar to scanM from before, but a pure version
+- this is the critical part, requiring access to an arp. the definition of ips requires 
    a fair amount of explanation, so i'm going to skip it for now. there are slides on it in appendix C. happy to discuss after the talk though if anyone is interested
--- SInfo is analagous to LInfo, both have monoid instances
+- SInfo is analagous to LInfo, both have monoid instances
 - we could use the results of this to implement an early stopping criterion for a training job for example. i'll return to this part in a moment.
 
 
@@ -263,27 +262,31 @@ Note:
 
 #  
 ```haskell
-type TInfo = (SInfo, LInfo)                        -- 
+type TInfo = (SInfo, LInfo)                        
 
 trainFoldM :: 
   forall c m. (Ips c, Holdout c, MonadIO m)
   => M.ModelHandle' c m
-  -> TrainingLogger c m                            -- 
+  -> TrainingLogger c m                            -- 1
   -> CT (M.LInput c) TInfo (ExceptT LError m) ()
 trainFoldM mh th =
        issueId 0
-    .| holdoutBranch (trainingStrategy th)         -- 
-    .| holdoutOrLearn                              -- 
+    .| holdoutBranch (trainingStrategy th)         -- 2
+    .| holdoutOrLearn                              -- 3
     .| gatherInfo
   where
-    holdoutOrLearn = getZipConduit $ l <* r        --
+    holdoutOrLearn = getZipConduit $ l <* r        -- 4
     l = leftOnly $ holdout @c mh (scoringLogger  th)
     r = rightOnly $  learn @c mh (learningLogger th)
     leftOnly  = ZipConduit . C.filter isLeft
     rightOnly = ZipConduit . C.filter isRight
 ```
 
-Note: doesn't need monadMask b/c it's already inside a mask
+Note: 
+- use trainingLogger to determine when to learn / score, and log each
+- holdout or learn branches the stream and calls the correct function
+- does this with an applicative instance
+- note that trainFoldM has all these reqs on c, but c isn't actually present at the value level. same was true of holdout and learn in fact
 
 
 # 
