@@ -455,10 +455,10 @@ Note:
 import Control.Monad ((>=>))
 
 mkHandle :: Session
-         -> Serializer i ex
-         -> Learner ex
-         -> Serializer j ex
-         -> Predictor ex o
+         -> (forall o. VW i o ex) 
+         -> (VW ex () ())
+         -> (forall o. VW j o ex)
+         -> (VW ex o o)
          -> ModelHandle i j o F.Statistics IO
 mkHandle sess sl l sp p = 
   ModelHandle l' p' (F.getStatistics sess) 
