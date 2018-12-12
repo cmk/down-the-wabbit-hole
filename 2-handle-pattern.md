@@ -3,7 +3,6 @@
 Note:
 
 - Haskell design patterns are a blogosphere phenom, so I'll include some links at the end of the talk.
-- The ones you've heard about are probably beautiful and mathematically sound. My colleague Greg Phiel is giving a talk on that kind of thing on Saturday that you should check out. 
 - However w/ bindings to ML libraries we are dealing with inherently mutable state and FFI code which doesnt behave nicely.
 - In those cases, we need an approach sometimes referred to as the handle pattern or service pattern. 
 
@@ -18,38 +17,12 @@ Note:
 Note:
 - Replace handle w/ object and function with method and this sounds like Object Oriented Programming.
 - You'll see that in practice here it looks quite different. 
-- Thats b/c we're essentially managing state outside of Haskell, and using FFI code to constrain input and output
 - This method does relies heavily on IO and closely related environments like MonadIO, MonadMask, & MonadResource.
 - Whenever you can write things in a pure way, you should attempt to do that and avoid IO. 
 - But we've found the handle pattern to be really useful when IO is required
 
 
-# A Simple Handle
-
-```haskell
-module Policy.Source.Types where
-
-data SourceHandle = SourceHandle {
-    loadModel :: ModelName -> 
-                 Maybe ModelVersion -> 
-                 IO (Either SourceError ModelFile)
-  , saveModel :: ModelName -> 
-                 ModelFile -> 
-                 IO (Either SourceError ModelVersion)
-  , listVersions :: ModelName -> 
-                    IO (Either SourceError [ModelVersion])
-}
-```
-Note:
-- This is a handle that represents a model location, either on the local filesystem, S3, a database,etc.
-- We have 3 functions.
-- We use TFS at work to serve models. 
-- TFS expects a model to consist of a directory w/ subdirs for each version. We use this format for other types of ML model as well. 
-- Notice that theres no way to delete a model.
-- This handle needs to do 2 things behind the scenes: manage scare resources efficiently & maintain version integrity
-
-
-# Polymorphic Handles
+# A Model Handle
 
 ```haskell
 module Policy.Model.Types where
