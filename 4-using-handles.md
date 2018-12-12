@@ -72,7 +72,7 @@ updateLearnInfo ::
   => Verbosity
   -> LLogger c m 
 updateLearnInfo v handle input info = 
-  if check v (numExamples info) then t else pure info t
+  if check v (numExamples info) then t else pure info
   where
    t = do
      err <- M.error handle input                   -- 2
